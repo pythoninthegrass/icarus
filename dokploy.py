@@ -25,13 +25,14 @@ Environment can also be set via DOKPLOY_ENV env var.
 
 import argparse
 import copy
-import httpx
 import json
 import re
 import sys
+from pathlib import Path
+
+import httpx
 import yaml
 from decouple import config
-from pathlib import Path
 
 
 def find_repo_root() -> Path:
@@ -114,9 +115,6 @@ def merge_env_overrides(cfg: dict, env_name: str) -> dict:
     """Deep-copy config and merge environment-specific overrides into it."""
     merged = copy.deepcopy(cfg)
     environments = merged.pop("environments", {})
-
-    # Suffix project name with environment
-    merged["project"]["name"] = f"{merged['project']['name']}-{env_name}"
 
     env_overrides = environments.get(env_name, {})
 
