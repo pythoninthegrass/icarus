@@ -154,11 +154,17 @@ class TestCmdCheck:
 
     def test_missing_api_key(self, tmp_path, monkeypatch, capsys):
         """Fails when DOKPLOY_API_KEY is not set."""
-        monkeypatch.delenv("DOKPLOY_API_KEY", raising=False)
-        monkeypatch.delenv("DOKPLOY_URL", raising=False)
+        from decouple import UndefinedValueError
 
-        config = {"project": {"name": "test"}, "apps": []}
-        (tmp_path / "dokploy.yml").write_text(yaml.dump(config))
+        def _missing_config(key, **kwargs):
+            if "default" in kwargs:
+                return kwargs["default"]
+            raise UndefinedValueError(f"{key} not found")
+
+        monkeypatch.setattr(dokploy, "config", _missing_config)
+
+        cfg = {"project": {"name": "test"}, "apps": []}
+        (tmp_path / "dokploy.yml").write_text(yaml.dump(cfg))
 
         with pytest.raises(SystemExit):
             dokploy.cmd_check(tmp_path)
