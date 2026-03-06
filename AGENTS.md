@@ -43,3 +43,54 @@ uv run --script dokploy.py --env prod destroy           # Tear down
 - If `dokploy.yml` structure changes: update `schemas/dokploy.schema.json`, `docs/configuration.md`, and `dokploy.yml.example`
 - If API behavior changes: update `docs/api-notes.md`
 - Example configs in `examples/` should validate against the schema
+
+## Context7
+
+Always use Context7 MCP when I need library/API documentation, code generation, setup or configuration steps without me having to explicitly ask.
+
+### Libraries
+
+- dokploy/website
+- jdx/mise
+- mrlesk/backlog.md
+- websites/taskfile_dev
+
+<!-- BACKLOG.MD MCP GUIDELINES START -->
+
+<CRITICAL_INSTRUCTION>
+
+## BACKLOG WORKFLOW INSTRUCTIONS
+
+This project uses Backlog.md MCP for all task and project management.
+
+**CRITICAL RESOURCE**: Read `backlog://workflow/overview` to understand when and how to use Backlog for this project.
+
+- **First time working here?** Read the overview resource IMMEDIATELY to learn the workflow
+- **Already familiar?** You should have the overview cached ("## Backlog.md Overview (MCP)")
+- **When to read it**: BEFORE creating tasks, or when you're unsure whether to track work
+
+### Key MCP Commands
+
+| Command | Purpose |
+|---------|---------|
+| `task_create` | Create a new task (status defaults to "To Do") |
+| `task_edit` | Edit metadata, check ACs, update notes, change status |
+| `task_view` | View full task details |
+| `task_search` | Find tasks by keyword |
+| `task_list` | List tasks with optional filters |
+| `task_complete` | **Moves task to `backlog/completed/`** — only use for cleanup, not for marking done |
+
+### Task Lifecycle
+
+1. **Create**: `task_create` — new task in `backlog/tasks/`
+2. **Start**: `task_edit(status: "In Progress")` — mark as active
+3. **Done**: `task_edit(status: "Done")` — mark finished, stays in `backlog/tasks/` (visible on kanban)
+4. **Archive**: `task_complete` — moves to `backlog/completed/` (use only when explicitly cleaning up)
+
+**IMPORTANT**: Use `task_edit(status: "Done")` to mark tasks as done. Do NOT use `task_complete` unless the user explicitly asks to archive/clean up — it removes the task from the kanban.
+
+The overview resource contains additional detail on decision frameworks, search-first workflow, and guides for task creation, execution, and completion.
+
+</CRITICAL_INSTRUCTION>
+
+<!-- BACKLOG.MD MCP GUIDELINES END -->
