@@ -1,0 +1,43 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/pythoninthegrass/dokploy_seed/main/schemas/dokploy.schema.json
+
+# All Docker images, no GitHub source
+# No github section needed
+
+project:
+  name: my-docker-stack
+  description: |
+    Docker-only deployment — all apps from container images
+
+  deploy_order:
+    - [postgres, redis]
+    - [app]
+
+environments:
+  prod:
+    apps:
+      app:
+        domain:
+          host: app.example.com
+          port: 3000
+          https: true
+          certificateType: letsencrypt
+
+apps:
+  - name: postgres
+    source: docker
+    dockerImage: postgres:17-alpine
+    env: |
+      POSTGRES_DB=myapp
+      POSTGRES_USER=myapp
+      POSTGRES_PASSWORD=changeme
+
+  - name: redis
+    source: docker
+    dockerImage: redis:7-alpine
+
+  - name: app
+    source: docker
+    dockerImage: ghcr.io/your-org/your-app:latest
+    env: |
+      DATABASE_URL=postgresql://myapp:changeme@{postgres}:5432/myapp
+      REDIS_URL=redis://{redis}:6379/0

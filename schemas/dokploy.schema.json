@@ -1,0 +1,193 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/pythoninthegrass/dokploy_seed/main/schemas/dokploy.schema.json",
+  "title": "Dokploy deployment config",
+  "type": "object",
+  "required": ["project", "apps"],
+  "additionalProperties": false,
+  "properties": {
+    "project": {
+      "type": "object",
+      "required": ["name", "description"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Dokploy project name"
+        },
+        "description": {
+          "type": "string",
+          "description": "Dokploy project description"
+        },
+        "env_targets": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "App names that receive the filtered .env file"
+        },
+        "deploy_order": {
+          "type": "array",
+          "items": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "description": "Deploy waves: outer list is sequential, inner lists are parallel"
+        }
+      }
+    },
+    "github": {
+      "type": "object",
+      "required": ["owner", "repository", "branch"],
+      "additionalProperties": false,
+      "description": "GitHub defaults for all github-sourced apps. Omit for Docker-only projects.",
+      "properties": {
+        "owner": {
+          "type": "string",
+          "description": "GitHub org or user"
+        },
+        "repository": {
+          "type": "string",
+          "description": "Repository name (not owner/repo — Dokploy prepends owner)"
+        },
+        "branch": {
+          "type": "string",
+          "description": "Branch to deploy from"
+        }
+      }
+    },
+    "environments": {
+      "type": "object",
+      "description": "Per-environment overrides. Each key is an environment name (e.g. prod, dev).",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "github": {
+            "type": "object",
+            "additionalProperties": false,
+            "description": "Override github branch/owner/repo for this environment.",
+            "properties": {
+              "owner": {
+                "type": "string",
+                "description": "GitHub org or user"
+              },
+              "repository": {
+                "type": "string",
+                "description": "Repository name"
+              },
+              "branch": {
+                "type": "string",
+                "description": "Branch to deploy from"
+              }
+            }
+          },
+          "apps": {
+            "type": "object",
+            "description": "Per-app overrides keyed by app name. Can override command, env, dockerImage, and domain.",
+            "additionalProperties": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "command": {
+                  "type": "string",
+                  "description": "Command override"
+                },
+                "env": {
+                  "type": "string",
+                  "description": "Per-app env vars override"
+                },
+                "dockerImage": {
+                  "type": "string",
+                  "description": "Docker image override"
+                },
+                "domain": {
+                  "oneOf": [
+                    { "$ref": "#/$defs/domain" },
+                    {
+                      "type": "array",
+                      "items": { "$ref": "#/$defs/domain" }
+                    }
+                  ],
+                  "description": "Domain config override"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "apps": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["name", "source"],
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Unique app name within the project"
+          },
+          "source": {
+            "type": "string",
+            "enum": ["docker", "github"],
+            "description": "App source type"
+          },
+          "dockerImage": {
+            "type": "string",
+            "description": "Docker image (required when source is docker)"
+          },
+          "command": {
+            "type": "string",
+            "description": "Command override. Supports {app_name} refs resolved to Dokploy appName at runtime."
+          },
+          "env": {
+            "type": "string",
+            "description": "Per-app env vars (not the project .env). Supports {app_name} refs."
+          },
+          "domain": {
+            "oneOf": [
+              { "$ref": "#/$defs/domain" },
+              {
+                "type": "array",
+                "items": { "$ref": "#/$defs/domain" }
+              }
+            ],
+            "description": "Domain config — single object or list of objects"
+          }
+        },
+        "if": {
+          "properties": { "source": { "const": "docker" } }
+        },
+        "then": {
+          "required": ["dockerImage"]
+        }
+      }
+    }
+  },
+  "$defs": {
+    "domain": {
+      "type": "object",
+      "required": ["host", "port", "https", "certificateType"],
+      "additionalProperties": false,
+      "properties": {
+        "host": {
+          "type": "string",
+          "description": "Domain hostname"
+        },
+        "port": {
+          "type": "integer",
+          "description": "Container port to expose"
+        },
+        "https": {
+          "type": "boolean",
+          "description": "Enable HTTPS"
+        },
+        "certificateType": {
+          "type": "string",
+          "enum": ["none", "letsencrypt"],
+          "description": "TLS certificate type"
+        }
+      }
+    }
+  }
+}

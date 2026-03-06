@@ -1,0 +1,69 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/pythoninthegrass/dokploy_seed/main/schemas/dokploy.schema.json
+
+project:
+  name: my-project
+  description: |
+    My project deployed via Dokploy
+
+  # Which apps receive the filtered .env file
+  env_targets: [web, worker]
+
+  # Deploy waves: sequential outer list, parallel inner lists
+  # Wave 1 completes before wave 2 starts
+  deploy_order:
+    - [redis]
+    - [web, worker]
+
+# GitHub defaults for all github-sourced apps
+# Omit this entire section for Docker-only projects
+github:
+  owner: your-org
+  repository: your-repo
+  branch: main
+
+# Per-environment overrides (merged into base config at runtime)
+environments:
+  prod:
+    apps:
+      web:
+        domain:
+          host: app.example.com
+          port: 8000
+          https: true
+          certificateType: letsencrypt
+  dev:
+    github:
+      branch: develop
+    apps:
+      web:
+        domain:
+          host: app-dev.example.com
+          port: 8000
+          https: true
+          certificateType: letsencrypt
+
+apps:
+  - name: redis
+    source: docker
+    dockerImage: redis:7-alpine
+
+  - name: web
+    source: github
+
+  - name: worker
+    source: github
+    command: >-
+      celery -A myproject worker
+      --loglevel=INFO --concurrency=4
+
+  # Docker app with {ref} resolution — {redis} is replaced with the
+  # Dokploy-assigned appName for the "redis" app at setup time
+  - name: monitor
+    source: docker
+    dockerImage: mher/flower:2.0.1
+    command: >-
+      celery --broker=redis://{redis}:6379/0 flower
+      --port=5555 --address=0.0.0.0
+    env: |
+      TZ=UTC
+      CELERY_BROKER_URL=redis://{redis}:6379/0

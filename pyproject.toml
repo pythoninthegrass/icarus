@@ -1,0 +1,18 @@
+[project]
+name = "dokploy-seed"
+version = "0.1.0"
+authors = [
+    { name = "pythoninthegrass", email = "4097471+pythoninthegrass@users.noreply.github.com" }
+]
+requires-python = ">=3.13,<3.14"
+
+dependencies = [
+    "httpx>=0.28.1,<1",
+    "python-decouple>=3.8",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "ruff>=0.15.5",
+]

@@ -1,0 +1,26 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/pythoninthegrass/dokploy_seed/main/schemas/dokploy.schema.json
+
+# Simplest possible config — single Docker app
+
+project:
+  name: my-app
+  description: |
+    Single container deployment
+
+  deploy_order:
+    - [app]
+
+environments:
+  prod:
+    apps:
+      app:
+        domain:
+          host: app.example.com
+          port: 3000
+          https: true
+          certificateType: letsencrypt
+
+apps:
+  - name: app
+    source: docker
+    dockerImage: nginx:alpine
