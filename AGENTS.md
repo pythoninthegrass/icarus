@@ -17,8 +17,10 @@ dokploy.py                  # The deployment script (top-level)
 dokploy.yml.example         # Annotated starter config
 schemas/dokploy.schema.json # JSON Schema for dokploy.yml
 .dokploy-state/             # State files (resource IDs, committed)
-docs/                       # Configuration reference, API notes
+docs/                       # Configuration reference, API notes, testing guide
 examples/                   # Example configs (web-app, docker-only, minimal)
+tests/                      # Pytest suite (see docs/testing.md)
+  fixtures/                 # YAML-backed test data
 ```
 
 ## Key Commands
@@ -33,6 +35,17 @@ uv run --script dokploy.py --env prod status            # Check status
 uv run --script dokploy.py --env prod destroy           # Tear down
 ```
 
+## Testing
+
+```bash
+uv run pytest tests/ -v               # all tests, verbose
+uv run pytest tests/ -x               # stop on first failure
+uv run pytest tests/ -k "filter_env"   # keyword filter
+uv run pytest tests/ -m unit          # run by marker
+```
+
+See [docs/testing.md](docs/testing.md) for fixture architecture, markers, coverage, and how to add new fixtures.
+
 ## Linting & Formatting
 
 - **ruff** for Python (line length 88, 4-space indent)
@@ -42,6 +55,7 @@ uv run --script dokploy.py --env prod destroy           # Tear down
 
 - If `dokploy.yml` structure changes: update `schemas/dokploy.schema.json`, `docs/configuration.md`, and `dokploy.yml.example`
 - If API behavior changes: update `docs/api-notes.md`
+- If test data changes: update YAML files in `tests/fixtures/`, not inline dicts
 - Example configs in `examples/` should validate against the schema
 
 ## Context7

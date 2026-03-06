@@ -1,0 +1,62 @@
+project:
+  name: my-web-app
+  description: "Web application with async task processing\n"
+  env_targets:
+    - web
+    - worker
+    - beat
+  deploy_order:
+    - - redis
+    - - web
+      - worker
+      - beat
+      - flower
+
+github:
+  owner: your-org
+  repository: your-app
+  branch: main
+
+environments:
+  prod:
+    apps:
+      web:
+        domain:
+          host: app.example.com
+          port: 8000
+          https: true
+          certificateType: letsencrypt
+      flower:
+        domain:
+          host: flower.example.com
+          port: 5555
+          https: true
+          certificateType: letsencrypt
+  dev:
+    github:
+      branch: develop
+    apps:
+      web:
+        domain:
+          host: app-dev.example.com
+          port: 8000
+          https: true
+          certificateType: letsencrypt
+
+apps:
+  - name: redis
+    source: docker
+    dockerImage: redis:7-alpine
+  - name: web
+    source: github
+  - name: worker
+    source: github
+    command: "celery -A myproject worker --loglevel=INFO"
+  - name: beat
+    source: github
+    command: "celery -A myproject beat --loglevel=INFO"
+  - name: flower
+    source: docker
+    dockerImage: mher/flower:2.0.1
+    command: "celery --broker=redis://{redis}:6379/0 flower --port=5555"
+    env: "CELERY_BROKER_URL=redis://{redis}:6379/0\n"

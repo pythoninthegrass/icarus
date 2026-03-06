@@ -1,0 +1,29 @@
+project:
+  name: my-docker-stack
+  description: "Docker-only deployment\n"
+  deploy_order:
+    - - postgres
+      - redis
+    - - app
+
+environments:
+  prod:
+    apps:
+      app:
+        domain:
+          host: app.example.com
+          port: 3000
+          https: true
+          certificateType: letsencrypt
+
+apps:
+  - name: postgres
+    source: docker
+    dockerImage: postgres:17-alpine
+  - name: redis
+    source: docker
+    dockerImage: redis:7-alpine
+  - name: app
+    source: docker
+    dockerImage: ghcr.io/your-org/your-app:latest
+    env: "DATABASE_URL=postgresql://myapp:changeme@{postgres}:5432/myapp\nREDIS_URL=redis://{redis}:6379/0\n"

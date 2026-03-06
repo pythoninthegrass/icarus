@@ -1,0 +1,20 @@
+project:
+  name: my-app
+  description: "Single container deployment\n"
+  deploy_order:
+    - - app
+
+environments:
+  prod:
+    apps:
+      app:
+        domain:
+          host: app.example.com
+          port: 3000
+          https: true
+          certificateType: letsencrypt
+
+apps:
+  - name: app
+    source: docker
+    dockerImage: nginx:alpine

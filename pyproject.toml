@@ -16,3 +16,26 @@ dependencies = [
 dev = [
     "ruff>=0.15.5",
 ]
+
+test = [
+    "coverage<8.0.0,>=7.6.1",
+    "hypothesis[cli]<7.0.0,>=6.112.1",
+    "pytest<9.0.0,>=8.3.3",
+    "pytest-asyncio<1.0.0,>=0.24.0",
+    "pytest-cov>=6.1.1",
+    "pytest-datafiles<4.0.0,>=3.0.0",
+    "pytest-xdist<4.0.0,>=3.6.1",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = "test_*.py"
+python_functions = "test_*"
+python_classes = "Test*"
+asyncio_mode = "auto"
+markers = [
+    "unit: marks tests as unit tests",
+    "integration: marks tests as integration tests",
+    "e2e: marks tests as end-to-end tests",
+    "benchmark: marks performance benchmark tests"
+]

@@ -1,0 +1,12 @@
+projectId: proj-abc123
+environmentId: env-xyz789
+apps:
+  redis:
+    applicationId: app-redis-001
+    appName: redis-abc123
+  web:
+    applicationId: app-web-002
+    appName: web-def456
+  worker:
+    applicationId: app-worker-003
+    appName: worker-ghi789
