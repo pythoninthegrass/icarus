@@ -47,7 +47,7 @@ The first step is to find out the root cause, nature and scope of the incident.
 After the initial assessment and containment to my best abilities, I will
 document all actions taken in a response plan.
 
-I will create a comment in [the issues](https://github.com/pythoninthegrasses/dokploy_seed/issues) to inform users about
+I will create a comment in [the issues](https://github.com/pythoninthegrass/dokploy_seed/issues) to inform users about
 the incident and what I actions I took to contain it.
 
 ### 3. Remediation
