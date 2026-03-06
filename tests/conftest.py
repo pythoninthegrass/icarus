@@ -1,6 +1,25 @@
+import os
+
 import pytest
 import yaml
+from hypothesis import HealthCheck, Phase, settings
 from pathlib import Path
+
+# Hypothesis profiles: "ci" for deterministic CI runs, "dev" for thorough local exploration.
+settings.register_profile(
+    "ci",
+    max_examples=100,
+    derandomize=True,
+    database=None,
+    suppress_health_check=[HealthCheck.too_slow],
+)
+settings.register_profile(
+    "dev",
+    max_examples=500,
+    deadline=None,
+    suppress_health_check=[HealthCheck.too_slow],
+)
+settings.load_profile(os.getenv("HYPOTHESIS_PROFILE", "default"))
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 

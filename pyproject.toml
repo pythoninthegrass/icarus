@@ -37,5 +37,6 @@ markers = [
     "unit: marks tests as unit tests",
     "integration: marks tests as integration tests",
     "e2e: marks tests as end-to-end tests",
-    "benchmark: marks performance benchmark tests"
+    "benchmark: marks performance benchmark tests",
+    "property: marks property-based tests (Hypothesis)"
 ]

@@ -57,6 +57,7 @@ See [docs/testing.md](docs/testing.md) for fixture architecture, markers, covera
 - If API behavior changes: update `docs/api-notes.md`
 - If test data changes: update YAML files in `tests/fixtures/`, not inline dicts
 - Example configs in `examples/` should validate against the schema
+- NEVER add section comments (e.g. `# --- Section Name ---`, `# == Foo ==`) to any code; use class/function structure and docstrings for organization
 
 ## Worktrunk (worktree cleanup)
 
