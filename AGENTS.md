@@ -51,6 +51,7 @@ Always use Context7 MCP when I need library/API documentation, code generation, 
 ### Libraries
 
 - dokploy/website
+- hypothesisworks/hypothesis
 - jdx/mise
 - mrlesk/backlog.md
 - websites/taskfile_dev
