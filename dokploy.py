@@ -25,14 +25,13 @@ Environment can also be set via DOKPLOY_ENV env var.
 
 import argparse
 import copy
+import httpx
 import json
 import re
 import sys
-from pathlib import Path
-
-import httpx
 import yaml
 from decouple import config
+from pathlib import Path
 
 
 def find_repo_root() -> Path:
