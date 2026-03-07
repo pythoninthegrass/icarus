@@ -318,7 +318,7 @@ class TestBuildBuildTypePayload:
         assert result["dockerBuildStage"] == "production"
 
     def test_static_build_type(self):
-        """Static buildType includes publishDirectory, no dockerfile fields."""
+        """Static buildType includes publishDirectory, SPA flag, and required API fields."""
         app_def = {
             "name": "site",
             "buildType": "static",
@@ -329,6 +329,9 @@ class TestBuildBuildTypePayload:
             "applicationId": "app-1",
             "buildType": "static",
             "publishDirectory": "dist",
+            "isStaticSpa": False,
+            "dockerContextPath": "",
+            "dockerBuildStage": "",
         }
         assert "dockerfile" not in result
 
@@ -340,14 +343,42 @@ class TestBuildBuildTypePayload:
         assert result["publishDirectory"] == ""
 
     def test_nixpacks_build_type(self):
-        """Nixpacks buildType has no extra fields."""
+        """Nixpacks buildType includes required API fields only."""
         result = dokploy.build_build_type_payload(
             "app-1", {"name": "app", "buildType": "nixpacks"}
         )
         assert result == {
             "applicationId": "app-1",
             "buildType": "nixpacks",
+            "dockerContextPath": "",
+            "dockerBuildStage": "",
         }
+
+    def test_all_build_types_include_required_api_fields(self):
+        """Dokploy API requires dockerContextPath and dockerBuildStage for all build types."""
+        for build_type in ("dockerfile", "static", "nixpacks", "heroku"):
+            result = dokploy.build_build_type_payload(
+                "app-1", {"name": "x", "buildType": build_type}
+            )
+            assert "dockerContextPath" in result, f"missing dockerContextPath for {build_type}"
+            assert "dockerBuildStage" in result, f"missing dockerBuildStage for {build_type}"
+
+    def test_static_spa_included_when_true(self):
+        """Static build with SPA=true passes isStaticSpa to the API."""
+        app_def = {
+            "name": "site",
+            "buildType": "static",
+            "publishDirectory": "dist",
+            "isStaticSpa": True,
+        }
+        result = dokploy.build_build_type_payload("app-1", app_def)
+        assert result["isStaticSpa"] is True
+
+    def test_static_spa_defaults_false(self):
+        """Static build without explicit SPA defaults to false."""
+        app_def = {"name": "site", "buildType": "static"}
+        result = dokploy.build_build_type_payload("app-1", app_def)
+        assert result.get("isStaticSpa") is False
 
 
 class TestBuildDomainPayload:

@@ -1,10 +1,10 @@
 ---
 id: TASK-003
 title: Implement dokploy.py changes to fully support prod project recreation
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-03-06 08:14'
-updated_date: '2026-03-06 15:34'
+updated_date: '2026-03-07 03:06'
 labels:
   - implementation
   - prod
@@ -20,7 +20,7 @@ documentation:
   - 'backlog://document/doc-002'
   - 'backlog://document/doc-003'
 priority: high
-ordinal: 3000
+ordinal: 1000
 ---
 
 ## Description

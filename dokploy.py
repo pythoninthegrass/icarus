@@ -187,13 +187,14 @@ def build_build_type_payload(app_id: str, app_def: dict) -> dict:
     payload: dict = {
         "applicationId": app_id,
         "buildType": build_type,
+        "dockerContextPath": app_def.get("dockerContextPath", ""),
+        "dockerBuildStage": app_def.get("dockerBuildStage", ""),
     }
     if build_type == "dockerfile":
         payload["dockerfile"] = app_def.get("dockerfile", "Dockerfile")
-        payload["dockerContextPath"] = app_def.get("dockerContextPath", "")
-        payload["dockerBuildStage"] = app_def.get("dockerBuildStage", "")
     elif build_type == "static":
         payload["publishDirectory"] = app_def.get("publishDirectory", "")
+        payload["isStaticSpa"] = app_def.get("isStaticSpa", False)
     return payload
 
 

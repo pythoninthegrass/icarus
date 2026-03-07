@@ -265,6 +265,10 @@
             "type": "string",
             "description": "Publish directory (for buildType: static)"
           },
+          "isStaticSpa": {
+            "type": "boolean",
+            "description": "Single Page Application mode (for buildType: static)"
+          },
           "autoDeploy": {
             "type": "boolean",
             "description": "Enable auto-deploy on push"
