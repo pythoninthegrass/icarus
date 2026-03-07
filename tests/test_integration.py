@@ -567,11 +567,11 @@ class TestCmdEnv:
 
 
 # ---------------------------------------------------------------------------
-# cmd_deploy tests
+# cmd_trigger tests
 # ---------------------------------------------------------------------------
 
 
-class TestCmdDeploy:
+class TestCmdTrigger:
     def _write_state(self, state_file: Path, state: dict) -> None:
         state_file.parent.mkdir(parents=True, exist_ok=True)
         state_file.write_text(json.dumps(state))
@@ -596,7 +596,7 @@ class TestCmdDeploy:
         deploy_route = router.post(f"{BASE_URL}/api/application.deploy").mock(return_value=httpx.Response(200, content=b""))
         client = _make_client(router)
 
-        dokploy.cmd_deploy(client, web_app_config, state_file)
+        dokploy.cmd_trigger(client, web_app_config, state_file)
 
         # Should be called once per app in deploy_order
         deploy_order = web_app_config["project"]["deploy_order"]
@@ -626,7 +626,7 @@ class TestCmdDeploy:
         client = _make_client(router)
 
         # Should not raise despite empty response
-        dokploy.cmd_deploy(client, minimal_config, state_file)
+        dokploy.cmd_trigger(client, minimal_config, state_file)
 
 
 # ---------------------------------------------------------------------------
@@ -775,7 +775,7 @@ class TestFullPipeline:
         dokploy.cmd_env(client, web_app_config, state_file, repo_root)
 
         # 3. Deploy
-        dokploy.cmd_deploy(client, web_app_config, state_file)
+        dokploy.cmd_trigger(client, web_app_config, state_file)
 
         # 4. Status
         dokploy.cmd_status(client, state_file)

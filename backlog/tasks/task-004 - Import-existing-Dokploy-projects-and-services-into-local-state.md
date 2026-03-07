@@ -1,10 +1,10 @@
 ---
 id: TASK-004
 title: Import existing Dokploy projects and services into local state
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-03-07 03:06'
-updated_date: '2026-03-07 03:15'
+updated_date: '2026-03-07 03:33'
 labels:
   - implementation
   - cli
@@ -29,11 +29,11 @@ This avoids the current problem where a project already exists on the server but
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Running `dokploy.py --env prod import` against a server with an existing project writes a correct state file
-- [ ] #2 Subsequent `status`, `env`, `deploy`, and `destroy` commands work using the imported state
-- [ ] #3 Fails with a clear error if no matching project exists on the server
-- [ ] #4 Fails with a clear error if a state file already exists (no silent overwrite)
-- [ ] #5 All app names in dokploy.yml are matched to their server-side applicationId and appName
+- [x] #1 Running `dokploy.py --env prod import` against a server with an existing project writes a correct state file
+- [x] #2 Subsequent `status`, `env`, `deploy`, and `destroy` commands work using the imported state
+- [x] #3 Fails with a clear error if no matching project exists on the server
+- [x] #4 Fails with a clear error if a state file already exists (no silent overwrite)
+- [x] #5 All app names in dokploy.yml are matched to their server-side applicationId and appName
 <!-- AC:END -->
 
 ## Implementation Notes

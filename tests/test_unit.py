@@ -82,9 +82,7 @@ class TestValidateEnvReferences:
         dokploy.validate_env_references(web_app_config)
 
     def test_unknown_app_in_env_overrides_exits(self, minimal_config):
-        minimal_config["environments"] = {
-            "prod": {"apps": {"bogus": {"dockerImage": "x"}}}
-        }
+        minimal_config["environments"] = {"prod": {"apps": {"bogus": {"dockerImage": "x"}}}}
         with pytest.raises(SystemExit):
             dokploy.validate_env_references(minimal_config)
 
@@ -211,12 +209,12 @@ class TestLoadSaveState:
 
 class TestArgparse:
     def test_valid_commands(self):
-        for cmd in ["check", "setup", "env", "deploy", "status", "destroy"]:
+        for cmd in ["check", "setup", "env", "deploy", "trigger", "status", "destroy", "import"]:
             args = dokploy.argparse.ArgumentParser()
             args.add_argument("--env", default=None)
             args.add_argument(
                 "command",
-                choices=["check", "setup", "env", "deploy", "status", "destroy"],
+                choices=["check", "setup", "env", "deploy", "trigger", "status", "destroy", "import"],
             )
             parsed = args.parse_args(["--env", "prod", cmd])
             assert parsed.command == cmd
@@ -227,7 +225,7 @@ class TestArgparse:
         parser.add_argument("--env", default=None)
         parser.add_argument(
             "command",
-            choices=["check", "setup", "env", "deploy", "status", "destroy"],
+            choices=["check", "setup", "env", "deploy", "trigger", "status", "destroy", "import"],
         )
         with pytest.raises(SystemExit):
             parser.parse_args(["bogus"])
@@ -237,7 +235,7 @@ class TestArgparse:
         parser.add_argument("--env", default=None)
         parser.add_argument(
             "command",
-            choices=["check", "setup", "env", "deploy", "status", "destroy"],
+            choices=["check", "setup", "env", "deploy", "trigger", "status", "destroy", "import"],
         )
         parsed = parser.parse_args(["--env", "staging", "deploy"])
         assert parsed.env == "staging"
@@ -337,16 +335,12 @@ class TestBuildBuildTypePayload:
 
     def test_static_default_publish_directory(self):
         """Static buildType without publishDirectory defaults to empty string."""
-        result = dokploy.build_build_type_payload(
-            "app-1", {"name": "site", "buildType": "static"}
-        )
+        result = dokploy.build_build_type_payload("app-1", {"name": "site", "buildType": "static"})
         assert result["publishDirectory"] == ""
 
     def test_nixpacks_build_type(self):
         """Nixpacks buildType includes required API fields only."""
-        result = dokploy.build_build_type_payload(
-            "app-1", {"name": "app", "buildType": "nixpacks"}
-        )
+        result = dokploy.build_build_type_payload("app-1", {"name": "app", "buildType": "nixpacks"})
         assert result == {
             "applicationId": "app-1",
             "buildType": "nixpacks",
@@ -357,9 +351,7 @@ class TestBuildBuildTypePayload:
     def test_all_build_types_include_required_api_fields(self):
         """Dokploy API requires dockerContextPath and dockerBuildStage for all build types."""
         for build_type in ("dockerfile", "static", "nixpacks", "heroku"):
-            result = dokploy.build_build_type_payload(
-                "app-1", {"name": "x", "buildType": build_type}
-            )
+            result = dokploy.build_build_type_payload("app-1", {"name": "x", "buildType": build_type})
             assert "dockerContextPath" in result, f"missing dockerContextPath for {build_type}"
             assert "dockerBuildStage" in result, f"missing dockerBuildStage for {build_type}"
 
@@ -439,23 +431,17 @@ class TestBuildAppSettingsPayload:
 
     def test_auto_deploy_only(self):
         """Only autoDeploy set."""
-        result = dokploy.build_app_settings_payload(
-            "app-1", {"name": "web", "autoDeploy": True}
-        )
+        result = dokploy.build_app_settings_payload("app-1", {"name": "web", "autoDeploy": True})
         assert result == {"applicationId": "app-1", "autoDeploy": True}
 
     def test_replicas_only(self):
         """Only replicas set."""
-        result = dokploy.build_app_settings_payload(
-            "app-1", {"name": "web", "replicas": 3}
-        )
+        result = dokploy.build_app_settings_payload("app-1", {"name": "web", "replicas": 3})
         assert result == {"applicationId": "app-1", "replicas": 3}
 
     def test_both_settings(self):
         """Both autoDeploy and replicas set."""
-        result = dokploy.build_app_settings_payload(
-            "app-1", {"name": "web", "autoDeploy": False, "replicas": 2}
-        )
+        result = dokploy.build_app_settings_payload("app-1", {"name": "web", "autoDeploy": False, "replicas": 2})
         assert result == {
             "applicationId": "app-1",
             "autoDeploy": False,
@@ -464,9 +450,7 @@ class TestBuildAppSettingsPayload:
 
     def test_auto_deploy_false_is_included(self):
         """autoDeploy=False is explicitly included (not treated as falsy)."""
-        result = dokploy.build_app_settings_payload(
-            "app-1", {"name": "web", "autoDeploy": False}
-        )
+        result = dokploy.build_app_settings_payload("app-1", {"name": "web", "autoDeploy": False})
         assert result is not None
         assert result["autoDeploy"] is False
 
@@ -513,3 +497,118 @@ class TestValidateConfigNewFixtures:
 
     def test_dockerfile_config_valid(self, github_dockerfile_config):
         dokploy.validate_config(github_dockerfile_config)
+
+
+class TestUnifiedDeploy:
+    def test_trigger_command_accepted(self):
+        """'trigger' is a valid CLI choice."""
+        parser = dokploy.argparse.ArgumentParser()
+        parser.add_argument("--env", default=None)
+        parser.add_argument(
+            "command",
+            choices=["check", "setup", "env", "deploy", "trigger", "status", "destroy", "import"],
+        )
+        parsed = parser.parse_args(["trigger"])
+        assert parsed.command == "trigger"
+
+    def test_deploy_still_valid_command(self):
+        """'deploy' remains a valid CLI choice."""
+        parser = dokploy.argparse.ArgumentParser()
+        parser.add_argument("--env", default=None)
+        parser.add_argument(
+            "command",
+            choices=["check", "setup", "env", "deploy", "trigger", "status", "destroy", "import"],
+        )
+        parsed = parser.parse_args(["deploy"])
+        assert parsed.command == "deploy"
+
+    def test_cmd_trigger_exists(self):
+        """dokploy.cmd_trigger is callable."""
+        assert callable(dokploy.cmd_trigger)
+
+    def test_fresh_project_runs_all_phases(self, tmp_path, monkeypatch):
+        """Fresh project (no state file) runs check, setup, env, trigger in order."""
+        calls = []
+        state_file = tmp_path / ".dokploy-state" / "prod.json"
+
+        monkeypatch.setattr(dokploy, "cmd_check", lambda repo_root: calls.append("check"))
+        monkeypatch.setattr(dokploy, "cmd_setup", lambda client, cfg, sf: calls.append("setup"))
+        monkeypatch.setattr(dokploy, "cmd_env", lambda client, cfg, sf, repo_root: calls.append("env"))
+        monkeypatch.setattr(dokploy, "cmd_trigger", lambda client, cfg, sf: calls.append("trigger"))
+
+        dokploy.cmd_deploy(
+            repo_root=tmp_path,
+            client="fake-client",
+            cfg={"project": {}},
+            state_file=state_file,
+        )
+
+        assert calls == ["check", "setup", "env", "trigger"]
+
+    def test_existing_project_skips_setup(self, tmp_path, monkeypatch):
+        """Existing project (state file present) skips setup."""
+        calls = []
+        state_file = tmp_path / ".dokploy-state" / "prod.json"
+        state_file.parent.mkdir(parents=True)
+        state_file.write_text("{}")
+
+        monkeypatch.setattr(dokploy, "cmd_check", lambda repo_root: calls.append("check"))
+        monkeypatch.setattr(dokploy, "cmd_setup", lambda client, cfg, sf: calls.append("setup"))
+        monkeypatch.setattr(dokploy, "cmd_env", lambda client, cfg, sf, repo_root: calls.append("env"))
+        monkeypatch.setattr(dokploy, "cmd_trigger", lambda client, cfg, sf: calls.append("trigger"))
+
+        dokploy.cmd_deploy(
+            repo_root=tmp_path,
+            client="fake-client",
+            cfg={"project": {}},
+            state_file=state_file,
+        )
+
+        assert "setup" not in calls
+        assert calls == ["check", "env", "trigger"]
+
+    def test_phase_headers_printed(self, tmp_path, monkeypatch, capsys):
+        """Each phase prints a header like '==> Phase N/4: ...'."""
+        state_file = tmp_path / ".dokploy-state" / "prod.json"
+
+        monkeypatch.setattr(dokploy, "cmd_check", lambda repo_root: None)
+        monkeypatch.setattr(dokploy, "cmd_setup", lambda client, cfg, sf: None)
+        monkeypatch.setattr(dokploy, "cmd_env", lambda client, cfg, sf, repo_root: None)
+        monkeypatch.setattr(dokploy, "cmd_trigger", lambda client, cfg, sf: None)
+
+        dokploy.cmd_deploy(
+            repo_root=tmp_path,
+            client="fake-client",
+            cfg={"project": {}},
+            state_file=state_file,
+        )
+
+        output = capsys.readouterr().out
+        assert "==> Phase 1/4: check" in output
+        assert "==> Phase 2/4: setup" in output
+        assert "==> Phase 3/4: env" in output
+        assert "==> Phase 4/4: trigger" in output
+
+    def test_check_failure_stops_execution(self, tmp_path, monkeypatch):
+        """If cmd_check raises SystemExit, subsequent phases are not called."""
+        calls = []
+        state_file = tmp_path / ".dokploy-state" / "prod.json"
+
+        def failing_check(repo_root):
+            calls.append("check")
+            raise SystemExit(1)
+
+        monkeypatch.setattr(dokploy, "cmd_check", failing_check)
+        monkeypatch.setattr(dokploy, "cmd_setup", lambda client, cfg, sf: calls.append("setup"))
+        monkeypatch.setattr(dokploy, "cmd_env", lambda client, cfg, sf, repo_root: calls.append("env"))
+        monkeypatch.setattr(dokploy, "cmd_trigger", lambda client, cfg, sf: calls.append("trigger"))
+
+        with pytest.raises(SystemExit):
+            dokploy.cmd_deploy(
+                repo_root=tmp_path,
+                client="fake-client",
+                cfg={"project": {}},
+                state_file=state_file,
+            )
+
+        assert calls == ["check"]

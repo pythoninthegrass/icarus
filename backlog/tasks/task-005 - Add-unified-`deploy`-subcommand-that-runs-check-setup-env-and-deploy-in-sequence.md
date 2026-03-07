@@ -3,10 +3,10 @@ id: TASK-005
 title: >-
   Add unified `deploy` subcommand that runs check, setup, env, and deploy in
   sequence
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-03-07 03:06'
-updated_date: '2026-03-07 03:07'
+updated_date: '2026-03-07 03:38'
 labels:
   - implementation
   - cli
@@ -36,9 +36,15 @@ This removes the need to manually run four separate commands for a fresh deploym
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Running the unified command on a fresh project (no state file) performs check, setup, env, and deploy in order
-- [ ] #2 Running the unified command on an existing project (state file present) skips setup and runs check, env, deploy
-- [ ] #3 Each phase prints a clear header so the user can follow progress
-- [ ] #4 Failure in any phase stops execution immediately with a non-zero exit code
-- [ ] #5 The existing granular subcommands still work independently
+- [x] #1 Running the unified command on a fresh project (no state file) performs check, setup, env, and deploy in order
+- [x] #2 Running the unified command on an existing project (state file present) skips setup and runs check, env, deploy
+- [x] #3 Each phase prints a clear header so the user can follow progress
+- [x] #4 Failure in any phase stops execution immediately with a non-zero exit code
+- [x] #5 The existing granular subcommands still work independently
 <!-- AC:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Renamed `cmd_deploy` to `cmd_trigger` and added a new `cmd_deploy` orchestrator that runs check -> setup (skipped if state file exists) -> env -> trigger with phase headers. Updated `main()` to include `trigger` as a CLI choice and route `deploy` to the orchestrator. Updated integration tests to use `cmd_trigger` for the old behavior. Added `TestUnifiedDeploy` with 7 tests covering all ACs.
+<!-- SECTION:FINAL_SUMMARY:END -->

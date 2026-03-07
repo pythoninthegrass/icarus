@@ -560,7 +560,7 @@ def cmd_env(client: DokployClient, cfg: dict, state_file: Path, repo_root: Path)
     print("\nEnvironment variables pushed.")
 
 
-def cmd_deploy(client: DokployClient, cfg: dict, state_file: Path) -> None:
+def cmd_trigger(client: DokployClient, cfg: dict, state_file: Path) -> None:
     state = load_state(state_file)
     deploy_order = cfg["project"].get("deploy_order", [])
 
@@ -573,6 +573,23 @@ def cmd_deploy(client: DokployClient, cfg: dict, state_file: Path) -> None:
             print(f"    {name} deploy triggered.")
 
     print("\nAll deploys triggered.")
+
+
+def cmd_deploy(repo_root: Path, client: DokployClient, cfg: dict, state_file: Path) -> None:
+    print("\n==> Phase 1/4: check")
+    cmd_check(repo_root)
+
+    if state_file.exists():
+        print("\n==> Phase 2/4: setup (skipped, state file exists)")
+    else:
+        print("\n==> Phase 2/4: setup")
+        cmd_setup(client, cfg, state_file)
+
+    print("\n==> Phase 3/4: env")
+    cmd_env(client, cfg, state_file, repo_root)
+
+    print("\n==> Phase 4/4: trigger")
+    cmd_trigger(client, cfg, state_file)
 
 
 def cmd_status(client: DokployClient, state_file: Path) -> None:
@@ -606,7 +623,7 @@ def cmd_import(client: DokployClient, cfg: dict, state_file: Path) -> None:
         sys.exit(1)
 
     project_name = cfg["project"]["name"]
-    print(f"Fetching projects from server...")
+    print("Fetching projects from server...")
     projects = client.get("project.all")
 
     matching = [p for p in projects if p["name"] == project_name]
@@ -665,7 +682,7 @@ def main() -> None:
     )
     parser.add_argument(
         "command",
-        choices=["check", "setup", "env", "deploy", "status", "destroy", "import"],
+        choices=["check", "setup", "env", "deploy", "trigger", "status", "destroy", "import"],
         help="Command to run",
     )
     args = parser.parse_args()
@@ -695,7 +712,9 @@ def main() -> None:
         case "env":
             cmd_env(client, cfg, state_file, repo_root)
         case "deploy":
-            cmd_deploy(client, cfg, state_file)
+            cmd_deploy(repo_root, client, cfg, state_file)
+        case "trigger":
+            cmd_trigger(client, cfg, state_file)
         case "status":
             cmd_status(client, state_file)
         case "destroy":
