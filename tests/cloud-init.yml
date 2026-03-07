@@ -1,5 +1,19 @@
 #cloud-config
 
+package_update: true
+
+packages:
+  - curl
+  - docker.io
+  - jq
+
+runcmd:
+  - netplan apply
+  - rm -f /etc/resolv.conf
+  - printf 'nameserver 1.1.1.1\nnameserver 1.0.0.1\n' > /etc/resolv.conf
+  - systemctl enable docker
+  - systemctl restart docker
+
 write_files:
   - path: /etc/netplan/50-cloud-init.yaml
     owner: root:root
@@ -19,19 +33,5 @@ write_files:
       {
         "dns": ["1.1.1.1", "1.0.0.1"]
       }
-
-package_update: true
-
-packages:
-  - curl
-  - docker.io
-  - jq
-
-runcmd:
-  - netplan apply
-  - rm -f /etc/resolv.conf
-  - printf 'nameserver 1.1.1.1\nnameserver 1.0.0.1\n' > /etc/resolv.conf
-  - systemctl enable docker
-  - systemctl restart docker
 
 final_message: "cloud-init setup completed after $UPTIME seconds!"
