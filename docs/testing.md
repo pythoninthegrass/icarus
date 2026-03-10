@@ -53,7 +53,7 @@ uv run pytest tests/ -m unit
 tests/
   conftest.py              # Shared pytest fixtures + Hypothesis profiles + E2E fixtures
   strategies.py            # Reusable Hypothesis strategies
-  test_unit.py             # Unit tests for pure functions in dokploy.py
+  test_unit.py             # Unit tests for pure functions in main.py
   test_integration.py      # Integration tests for DokployClient and cmd_* functions
   test_property.py         # Property-based tests (Hypothesis)
   test_e2e.py              # E2E tests against a real Dokploy instance
@@ -106,12 +106,12 @@ def your_fixture():
     return _load_fixture("your_fixture.yml")
 ```
 
-## Importing `dokploy.py`
+## Importing `main.py`
 
-`dokploy.py` is a PEP 723 inline script, not a package. Tests import it using `importlib`:
+`main.py` is a PEP 723 inline script, not a package. Tests import it using `importlib`:
 
 ```python
-_SCRIPT = Path(__file__).resolve().parent.parent / "dokploy.py"
+_SCRIPT = Path(__file__).resolve().parent.parent / "main.py"
 _spec = importlib.util.spec_from_file_location("dokploy", _SCRIPT)
 dokploy = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(dokploy)
@@ -163,7 +163,7 @@ HYPOTHESIS_PROFILE=dev uv run pytest tests/ -m property
 
 ## E2E Tests
 
-E2E tests run `dokploy.py` commands against a real Dokploy instance. They are marked with `@pytest.mark.e2e` and **skipped by default** via `addopts = "-m 'not e2e'"` in `pyproject.toml`.
+E2E tests run `main.py` commands against a real Dokploy instance. They are marked with `@pytest.mark.e2e` and **skipped by default** via `addopts = "-m 'not e2e'"` in `pyproject.toml`.
 
 ### Prerequisites
 

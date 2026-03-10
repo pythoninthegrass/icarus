@@ -11,7 +11,7 @@ Contributions are welcome. Please open an issue before starting work on large ch
 
 1. Fork the repo and create a branch from `main`
 2. Make your changes
-3. Ensure `dokploy.py --help` still works: `uv run --script dokploy.py --help`
+3. Ensure `main.py --help` still works: `uv run --script main.py --help`
 4. Ensure example configs validate against the schema
 5. Ensure markdown passes linting: `markdownlint '**/*.md'`
 6. Open a pull request using the [PR template](.github/PULL_REQUEST_TEMPLATE.md)

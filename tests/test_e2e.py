@@ -7,7 +7,7 @@ from pathlib import Path
 
 pytestmark = pytest.mark.e2e
 
-_SCRIPT = Path(__file__).resolve().parent.parent / "dokploy.py"
+_SCRIPT = Path(__file__).resolve().parent.parent / "main.py"
 _spec = importlib.util.spec_from_file_location("dokploy", _SCRIPT)
 dokploy = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(dokploy)

@@ -9,8 +9,8 @@ import yaml
 from pathlib import Path
 from unittest.mock import patch
 
-# Import dokploy.py as a module despite it being a PEP 723 script.
-_SCRIPT = Path(__file__).resolve().parent.parent / "dokploy.py"
+# Import main.py as a module despite it being a PEP 723 script.
+_SCRIPT = Path(__file__).resolve().parent.parent / "main.py"
 _spec = importlib.util.spec_from_file_location("dokploy", _SCRIPT)
 dokploy = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(dokploy)
@@ -990,14 +990,16 @@ class TestResolveGithubProvider:
         """Picks the provider whose repos include the configured owner."""
         router = respx.Router()
         router.get(f"{BASE_URL}/api/github.getGithubRepositories").mock(
-            side_effect=lambda request: httpx.Response(
-                200,
-                json=[{"owner": {"login": "wrong-org"}, "name": "repo-a"}],
-            )
-            if request.url.params.get("githubId") == "gh-wrong"
-            else httpx.Response(
-                200,
-                json=[{"owner": {"login": "my-org"}, "name": "repo-b"}],
+            side_effect=lambda request: (
+                httpx.Response(
+                    200,
+                    json=[{"owner": {"login": "wrong-org"}, "name": "repo-a"}],
+                )
+                if request.url.params.get("githubId") == "gh-wrong"
+                else httpx.Response(
+                    200,
+                    json=[{"owner": {"login": "my-org"}, "name": "repo-b"}],
+                )
             )
         )
         client = _make_client(router)

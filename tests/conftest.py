@@ -8,7 +8,7 @@ import yaml
 from hypothesis import HealthCheck, Phase, settings
 from pathlib import Path
 
-_SCRIPT = Path(__file__).resolve().parent.parent / "dokploy.py"
+_SCRIPT = Path(__file__).resolve().parent.parent / "main.py"
 _spec = importlib.util.spec_from_file_location("dokploy", _SCRIPT)
 _dokploy = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(_dokploy)

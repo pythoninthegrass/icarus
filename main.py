@@ -18,8 +18,8 @@
 Dokploy deployment script — config-driven via dokploy.yml.
 
 Usage:
-    dokploy.py check
-    dokploy.py --env <environment> <setup|env|deploy|status|destroy>
+    dps check
+    dps --env <environment> <setup|env|deploy|status|destroy>
 
 Environment can also be set via DOKPLOY_ENV env var.
 """
@@ -36,8 +36,8 @@ from pathlib import Path
 
 
 def find_repo_root() -> Path:
-    """Walk up from the script's directory looking for dokploy.yml."""
-    current = Path(__file__).resolve().parent
+    """Walk up from cwd looking for dokploy.yml."""
+    current = Path.cwd()
     while True:
         if (current / "dokploy.yml").exists():
             return current
@@ -711,7 +711,7 @@ def main() -> None:
     args = parser.parse_args()
 
     if args.command == "check":
-        cmd_check(Path(__file__).resolve().parent)
+        cmd_check(Path.cwd())
         return
 
     env_name = args.env or config("DOKPLOY_ENV", default="dev")

@@ -1,4 +1,4 @@
-"""Unit tests for pure functions in dokploy.py."""
+"""Unit tests for pure functions in main.py."""
 
 import importlib.util
 import json
@@ -7,8 +7,8 @@ import sys
 import yaml
 from pathlib import Path
 
-# Import dokploy.py as a module despite it being a PEP 723 script.
-_SCRIPT = Path(__file__).resolve().parent.parent / "dokploy.py"
+# Import main.py as a module despite it being a PEP 723 script.
+_SCRIPT = Path(__file__).resolve().parent.parent / "main.py"
 _spec = importlib.util.spec_from_file_location("dokploy", _SCRIPT)
 dokploy = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(dokploy)
@@ -22,13 +22,12 @@ class TestFindRepoRoot:
         (tmp_path / "dokploy.yml").write_text("project: {}")
         sub = tmp_path / "a" / "b"
         sub.mkdir(parents=True)
-        # Make the function think the script lives in sub/
-        monkeypatch.setattr(dokploy, "__file__", str(sub / "dokploy.py"))
+        monkeypatch.chdir(sub)
         assert dokploy.find_repo_root() == tmp_path
 
     def test_exits_when_not_found(self, tmp_path, monkeypatch):
         """find_repo_root exits when no dokploy.yml is found."""
-        monkeypatch.setattr(dokploy, "__file__", str(tmp_path / "dokploy.py"))
+        monkeypatch.chdir(tmp_path)
         with pytest.raises(SystemExit):
             dokploy.find_repo_root()
 

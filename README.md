@@ -1,11 +1,12 @@
 # dokploy_seed
 
-Deployment script for [Dokploy](https://dokploy.com). Define your project's apps, domains, deploy order, and environment overrides in a single `dokploy.yml` — the script handles the Dokploy API calls (cf. IaC).
+Deployment tool for [Dokploy](https://dokploy.com). Define your project's apps, domains, deploy order, and environment overrides in a single `dokploy.yml` — the tool handles the Dokploy API calls (cf. IaC).
 
 **Table of Contents**
 
 * [dokploy\_seed](#dokploy_seed)
   * [Prerequisites](#prerequisites)
+  * [Install](#install)
   * [Quick Start](#quick-start)
     * [Creating from the command line](#creating-from-the-command-line)
   * [Commands](#commands)
@@ -24,8 +25,35 @@ Deployment script for [Dokploy](https://dokploy.com). Define your project's apps
 ## Prerequisites
 
 * A running [Dokploy](https://dokploy.com) instance
-* [uv](https://docs.astral.sh/uv/) (the script runs as a [PEP 723](https://peps.python.org/pep-0723/) inline script via `uv run --script`)
+* [uv](https://docs.astral.sh/uv/)
 * A Dokploy API key (generated in Dokploy UI > Settings > API)
+
+## Install
+
+### Standalone (no install)
+
+Copy `main.py` to the target machine and run directly.
+Dependencies are resolved automatically by `uv` via
+[PEP 723](https://peps.python.org/pep-0723/) inline metadata.
+
+```bash
+# Run from the repo
+./main.py list
+
+# Or explicitly with uv
+uv run --script main.py --help
+```
+
+### Install from git
+
+```bash
+# One-off execution
+uvx --from git+https://github.com/pythoninthegrass/dokploy_seed.git dps --help
+
+# Persistent install
+uv tool install git+https://github.com/pythoninthegrass/dokploy_seed.git
+dps --help
+```
 
 ## Quick Start
 
@@ -45,11 +73,11 @@ Deployment script for [Dokploy](https://dokploy.com). Define your project's apps
 4. Run:
 
     ```bash
-    ./dokploy.py --env prod setup     # Create project + apps + providers + domains
-    ./dokploy.py --env prod env       # Push filtered .env to env_targets + per-app env
-    ./dokploy.py --env prod deploy    # Deploy apps in wave order
-    ./dokploy.py --env prod status    # Show status of all apps
-    ./dokploy.py --env prod destroy   # Delete project + all apps
+    dps --env prod setup     # Create project + apps + providers + domains
+    dps --env prod env       # Push filtered .env to env_targets + per-app env
+    dps --env prod deploy    # Deploy apps in wave order
+    dps --env prod status    # Show status of all apps
+    dps --env prod destroy   # Delete project + all apps
     ```
 
 ### Creating from the command line
@@ -75,14 +103,17 @@ The `--env` flag is optional and defaults to `dev`. It can also be set via the `
 
 ```bash
 # Explicit flag (highest priority)
-uv run --script dokploy.py --env prod status
+dps --env prod status
 
 # Via environment variable
 export DOKPLOY_ENV=prod
-uv run --script dokploy.py status
+dps status
 
-# No flag, no variable → defaults to 'dev'
-uv run --script dokploy.py status
+# No flag, no variable -> defaults to 'dev'
+dps status
+
+# Standalone mode
+uv run --script main.py --env prod status
 ```
 
 Resolution order: `--env` flag > `DOKPLOY_ENV` (from `.env` or environment) > `dev`.
@@ -122,7 +153,7 @@ The `environments.<env>` section is merged into the base config before any comma
 <details>
 <summary><strong>Config File Discovery</strong></summary>
 
-The script walks upward from its own location looking for `dokploy.yml`. This means it works whether placed at the repo root or in a `scripts/` subdirectory.
+The tool walks upward from the current working directory looking for `dokploy.yml`. This means it works from any subdirectory within a project that has a `dokploy.yml` at its root.
 
 </details>
 <!-- markdownlint-enable MD033 -->
@@ -150,16 +181,50 @@ See the `examples/` directory:
 
 ## Adding to an Existing Project
 
-If you already have a repo and prefer to copy the files instead of using the template:
+Install `dps` globally:
 
-1. Copy `dokploy.py` to your repo root (or `scripts/`)
-2. Create `dokploy.yml` based on `dokploy.yml.example` (schema is fetched from GitHub automatically)
-3. Create `.dokploy-state/` directory (add a `.gitkeep`)
-4. Add `DOKPLOY_URL` and `DOKPLOY_API_KEY` to your `.env`
-5. Run `./dokploy.py --env prod setup`
+```bash
+uv tool install git+https://github.com/pythoninthegrass/dokploy_seed.git
+```
+
+Then in your project directory:
+
+1. Create `dokploy.yml` based on `dokploy.yml.example` (schema is fetched from GitHub automatically)
+2. Create `.dokploy-state/` directory (add a `.gitkeep`)
+3. Add `DOKPLOY_URL` and `DOKPLOY_API_KEY` to your `.env`
+4. Run `dps --env prod setup`
 
 > [!WARNING]
 > The `destroy` command is irreversible — it deletes the entire Dokploy project and all associated apps. The local state file is also removed.
+
+## Project Structure
+
+```text
+main.py                  # PEP 723 standalone script + all logic
+src/dokploy_seed/
+  __init__.py            # Re-exports main for package distribution
+  main.py                # Symlink to ../../main.py
+pyproject.toml           # uv_build backend + entry point
+.tool-versions           # mise runtime versions (python, ruff, uv)
+.env.example             # Environment variable template
+```
+
+## Development
+
+```bash
+# Install python, ruff, and uv via mise
+mise install
+
+# Install project dependencies
+uv sync --all-extras
+
+# Lint
+ruff format --check --diff .
+ruff check .
+
+# Format
+ruff format .
+```
 
 ## API Notes
 

@@ -1,4 +1,4 @@
-"""Property-based tests for dokploy.py pure functions using Hypothesis."""
+"""Property-based tests for main.py pure functions using Hypothesis."""
 
 import copy
 import importlib.util
@@ -21,8 +21,8 @@ env_content = strategies.env_content
 exclude_prefixes = strategies.exclude_prefixes
 state_dict = strategies.state_dict
 
-# Import dokploy.py as a module despite it being a PEP 723 script.
-_SCRIPT = Path(__file__).resolve().parent.parent / "dokploy.py"
+# Import main.py as a module despite it being a PEP 723 script.
+_SCRIPT = Path(__file__).resolve().parent.parent / "main.py"
 _spec = importlib.util.spec_from_file_location("dokploy", _SCRIPT)
 dokploy = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(dokploy)

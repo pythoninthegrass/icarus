@@ -12,6 +12,6 @@ How were the changes tested?
 
 ## Checklist
 
-- [ ] `dokploy.py --help` still works
+- [ ] `dps --help` still works
 - [ ] Example configs validate against the schema
 - [ ] Markdown files pass `markdownlint`
