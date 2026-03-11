@@ -66,10 +66,10 @@ def find_repo_root() -> Path:
 DEFAULT_ENV_EXCLUDE_PREFIXES = [
     "COMPOSE_",
     "CONTAINER_NAME",
+    "DOKPLOY_",
     "DOPPLER_",
     "PGDATA",
     "POSTGRES_VERSION",
-    "DOKPLOY_",
     "TASK_X_",
 ]
 
