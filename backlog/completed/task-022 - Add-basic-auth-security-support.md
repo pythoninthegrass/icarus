@@ -1,7 +1,7 @@
 ---
 id: TASK-022
 title: Add basic auth / security support
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-03-23 18:05'
 updated_date: '2026-03-25 18:03'
@@ -25,7 +25,7 @@ The TF provider can configure basic authentication (username/password) on applic
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Apps can declare basic auth in dokploy.yml (username, password)
-- [ ] #2 Security config is applied during setup
-- [ ] #3 Security config is reconciled on apply/redeploy
+- [x] #1 Apps can declare basic auth in dokploy.yml (username, password)
+- [x] #2 Security config is applied during setup
+- [x] #3 Security config is reconciled on apply/redeploy
 <!-- AC:END -->

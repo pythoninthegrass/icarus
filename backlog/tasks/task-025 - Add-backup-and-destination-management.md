@@ -1,10 +1,10 @@
 ---
 id: TASK-025
 title: Add backup and destination management
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-03-23 18:05'
-updated_date: '2026-03-25 18:03'
+updated_date: '2026-03-25 20:59'
 labels:
   - gap-analysis
   - new-resource
