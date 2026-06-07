@@ -96,13 +96,18 @@ cd my-project
 
 ## Commands
 
-| Command   | Description                                                                                      |
-|-----------|--------------------------------------------------------------------------------------------------|
-| `setup`   | Create Dokploy project, apps, configure providers (Docker/GitHub), set commands, create domains  |
-| `env`     | Push filtered `.env` to `env_targets` apps + per-app custom env vars                             |
-| `apply`   | Full pipeline: check, setup, env, trigger deploys in `deploy_order` wave sequence                |
-| `status`  | Show application status for all apps in the project                                              |
-| `destroy` | Delete the Dokploy project (cascades to all apps) and remove state file                          |
+| Command   | Description                                                                                     |
+| --------- | ----------------------------------------------------------------------------------------------- |
+| `check`   | Verify Dokploy connectivity and configuration                                                   |
+| `setup`   | Create Dokploy project, apps, configure providers (Docker/GitHub), set commands, create domains |
+| `env`     | Push filtered `.env` to `env_targets` apps + per-app custom env vars                            |
+| `plan`    | Preview changes `apply` would make without executing them (dry run)                             |
+| `apply`   | Full pipeline: check, setup, env, trigger deploys in `deploy_order` wave sequence               |
+| `status`  | Show application status for all apps in the project                                             |
+| `clean`   | Remove stale Traefik rules and Docker artifacts                                                 |
+| `destroy` | Delete the Dokploy project (cascades to all apps) and remove state file                         |
+| `logs`    | Tail container logs (`-f` to follow, `-n` for line count, `--exited` for stopped containers)    |
+| `exec`    | Open an interactive shell or run a command in a running container                               |
 
 ## Environment Selection
 
@@ -205,13 +210,27 @@ Then in your project directory:
 ## Project Structure
 
 ```text
-main.py                  # PEP 723 standalone script + all logic
+main.py                     # Thin CLI router (imports from icarus package)
 src/icarus/
-  __init__.py            # Re-exports main for package distribution
-  main.py                # Symlink to ../../main.py
-pyproject.toml           # uv_build backend + entry point
-.tool-versions           # mise runtime versions (python, ruff, uv)
-.env.example             # Environment variable template
+  __init__.py               # Re-exports all public symbols (FastAPI-style)
+  cli.py                    # argparse + match/case dispatch (main entry point)
+  config.py                 # Config singleton, find_repo_root
+  schema.py                 # dokploy.yml loading, validation, merging
+  env.py                    # Env var filtering, resolve_refs
+  client.py                 # DokployClient, state load/save
+  payloads.py               # Payload builders, DB constants, compose helpers
+  reconcile.py              # Reconciliation logic for redeploy
+  plan.py                   # Plan/diff logic, cmd_plan
+  ssh.py                    # SSH/Docker/Traefik/container helpers
+  commands.py               # All cmd_* command implementations
+pyproject.toml              # uv_build backend + ic entry point
+dokploy.yml.example         # Annotated starter config
+schemas/dokploy.schema.json # JSON Schema for dokploy.yml
+.dokploy-state/             # State files (resource IDs, committed)
+docs/                       # Configuration reference, API notes, testing guide
+examples/                   # Example configs (web-app, docker-only, minimal)
+tests/                      # Pytest suite (see docs/testing.md)
+  fixtures/                 # YAML-backed test data
 ```
 
 ## Development
