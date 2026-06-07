@@ -1,0 +1,20 @@
+project:
+  name: cert-test
+  description: "Test project with custom certificates"
+
+certificates:
+  - name: wildcard-example
+    certFile: certs/wildcard.pem
+    keyFile: certs/wildcard.key
+    autoRenew: false
+
+apps:
+  - name: web
+    source: docker
+    dockerImage: nginx:alpine
+    domain:
+      host: app.example.com
+      port: 8000
+      https: true
+      certificateType: custom
+      certificate: wildcard-example

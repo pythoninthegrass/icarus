@@ -17,6 +17,7 @@ from icarus.payloads import (
     build_app_settings_payload,
     build_backup_create_payload,
     build_build_type_payload,
+    build_certificate_create_payload,
     build_database_create_payload,
     build_destination_create_payload,
     build_destination_update_payload,
@@ -46,6 +47,7 @@ from icarus.reconcile import (
     reconcile_app_schedules,
     reconcile_app_security,
     reconcile_app_settings,
+    reconcile_certificates,
     reconcile_database_backups,
     reconcile_destinations,
     reconcile_registries,
@@ -205,6 +207,7 @@ def cmd_setup(client: DokployClient, cfg: dict, state_file: Path, repo_root: Pat
         {"name": project_cfg["name"], "description": project_cfg["description"]},
     )
     project_id = project["project"]["projectId"]
+    organization_id = project["project"].get("organizationId", "")
     environment_id = project["environment"]["environmentId"]
     print(f"  Project created: {project_id}")
     print(f"  Environment ID: {environment_id}")
@@ -222,6 +225,7 @@ def cmd_setup(client: DokployClient, cfg: dict, state_file: Path, repo_root: Pat
 
     state: dict = {
         "projectId": project_id,
+        "organizationId": organization_id,
         "environmentId": environment_id,
         "apps": {},
     }
@@ -269,6 +273,27 @@ def cmd_setup(client: DokployClient, cfg: dict, state_file: Path, repo_root: Pat
                 destination_id = resp["destinationId"]
                 print(f"  Destination created: {destination_id}")
             state["destinations"][name] = {"destinationId": destination_id}
+
+    # 2.7 Certificates (server-level, idempotent)
+    certificates_cfg = cfg.get("certificates", [])
+    if certificates_cfg:
+        print("Resolving certificates...")
+        existing_certs = client.get("certificates.all")
+        existing_by_name = {c["name"]: c for c in existing_certs}
+        state["certificates"] = {}
+        effective_root = repo_root or state_file.parent.parent
+        for cert_def in certificates_cfg:
+            name = cert_def["name"]
+            if name in existing_by_name:
+                certificate_id = existing_by_name[name]["certificateId"]
+                print(f"  Certificate '{name}' exists: {certificate_id}")
+            else:
+                print(f"  Creating certificate: {name}...")
+                payload = build_certificate_create_payload(cert_def, organization_id, effective_root)
+                resp = client.post("certificates.create", payload)
+                certificate_id = resp["certificateId"]
+                print(f"  Certificate created: {certificate_id}")
+            state["certificates"][name] = {"certificateId": certificate_id}
 
     # 3. Create apps
     for app_def in cfg["apps"]:
@@ -670,6 +695,7 @@ def cmd_apply(
         cleanup_stale_routes(load_state(state_file), cfg)
         reconcile_registries(client, cfg, load_state(state_file), state_file)
         reconcile_destinations(client, cfg, load_state(state_file), state_file)
+        reconcile_certificates(client, cfg, load_state(state_file), state_file, repo_root=repo_root)
         reconcile_app_registry(client, cfg, load_state(state_file))
         reconcile_app_domains(client, cfg, load_state(state_file), state_file)
         reconcile_app_schedules(client, cfg, load_state(state_file), state_file)

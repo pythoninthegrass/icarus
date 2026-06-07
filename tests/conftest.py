@@ -104,6 +104,12 @@ def backup_config():
 
 
 @pytest.fixture
+def certificate_config():
+    """Config with custom certificates and domain referencing them."""
+    return _load_fixture("certificate_config.yml")
+
+
+@pytest.fixture
 def dokploy_yml(tmp_path, minimal_config):
     """Write a minimal dokploy.yml in tmp_path and return the path."""
     config_file = tmp_path / "dokploy.yml"

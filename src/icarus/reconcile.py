@@ -5,6 +5,7 @@ from icarus.env import resolve_refs
 from icarus.payloads import (
     build_app_settings_payload,
     build_backup_create_payload,
+    build_certificate_create_payload,
     build_destination_create_payload,
     build_destination_update_payload,
     build_domain_payload,
@@ -325,7 +326,7 @@ def reconcile_domains(
             domain_id = ex["domainId"]
             needs_update = any(
                 payload.get(key) != ex.get(key)
-                for key in ("port", "https", "certificateType", "path", "internalPath", "stripPath")
+                for key in ("port", "https", "certificateType", "customCertResolver", "path", "internalPath", "stripPath")
             )
             if needs_update:
                 update_payload = {k: v for k, v in payload.items() if k not in ("applicationId", "composeId", "domainType")}
@@ -561,6 +562,41 @@ def reconcile_destinations(
             resp = client.post("destination.create", payload)
             destination_id = resp["destinationId"]
         state["destinations"][name] = {"destinationId": destination_id}
+
+    save_state(state, state_file)
+
+
+def reconcile_certificates(
+    client: DokployClient,
+    cfg: dict,
+    state: dict,
+    state_file: Path,
+    *,
+    repo_root: Path | None = None,
+) -> None:
+    """Reconcile certificates: create missing, skip existing."""
+    certificates_cfg = cfg.get("certificates", [])
+    if not certificates_cfg:
+        return
+
+    existing_certs = client.get("certificates.all")
+    existing_by_name = {c["name"]: c for c in existing_certs}
+
+    if "certificates" not in state:
+        state["certificates"] = {}
+
+    organization_id = state.get("organizationId", "")
+    effective_root = repo_root or Path(".")
+
+    for cert_def in certificates_cfg:
+        name = cert_def["name"]
+        if name in existing_by_name:
+            certificate_id = existing_by_name[name]["certificateId"]
+        else:
+            payload = build_certificate_create_payload(cert_def, organization_id, effective_root)
+            resp = client.post("certificates.create", payload)
+            certificate_id = resp["certificateId"]
+        state["certificates"][name] = {"certificateId": certificate_id}
 
     save_state(state, state_file)
 

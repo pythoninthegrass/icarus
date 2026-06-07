@@ -103,6 +103,14 @@ apps:
       TZ=UTC
       CELERY_BROKER_URL=redis://{redis}:6379/0
 
+# Custom SSL/TLS certificates (uploaded during setup)
+# Domains can reference these by name with certificateType: custom
+certificates:
+  - name: wildcard-example
+    certFile: certs/wildcard.pem     # path relative to repo root
+    keyFile: certs/wildcard.key      # path relative to repo root
+    autoRenew: false                 # optional
+
 # Database resources (created and deployed during setup)
 # Supported types: postgres, mysql, mariadb, mongo, redis
 database:

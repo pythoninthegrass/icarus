@@ -116,16 +116,47 @@ On first `setup`, schedules are created via the Dokploy `schedule.create` API. O
 
 ### Domain Object
 
-| Key | Required | Description |
-|-----|----------|-------------|
-| `domain.host` | yes | Domain hostname |
-| `domain.port` | yes | Container port to expose |
-| `domain.https` | yes | Enable HTTPS |
-| `domain.certificateType` | yes | `none` or `letsencrypt` |
-| `domain.path` | no | URL path (default: `/`) |
-| `domain.internalPath` | no | Internal routing path (default: `/`) |
-| `domain.stripPath` | no | Strip path prefix before forwarding (default: `false`) |
-| `domain.serviceName` | if compose | Target service name within a compose stack for Traefik routing |
+| Key                      | Required   | Description                                                                       |
+| ------------------------ | ---------- | --------------------------------------------------------------------------------- |
+| `domain.host`            | yes        | Domain hostname                                                                   |
+| `domain.port`            | yes        | Container port to expose                                                          |
+| `domain.https`           | yes        | Enable HTTPS                                                                      |
+| `domain.certificateType` | yes        | `none`, `letsencrypt`, or `custom`                                                |
+| `domain.certificate`     | if custom  | Certificate name (from `certificates` section) when `certificateType` is `custom` |
+| `domain.path`            | no         | URL path (default: `/`)                                                           |
+| `domain.internalPath`    | no         | Internal routing path (default: `/`)                                              |
+| `domain.stripPath`       | no         | Strip path prefix before forwarding (default: `false`)                            |
+| `domain.serviceName`     | if compose | Target service name within a compose stack for Traefik routing                    |
+
+## Certificates
+
+Custom SSL/TLS certificates can be declared at the top level and referenced by domains. Certificate files are read at deploy time and uploaded to Dokploy.
+
+```yaml
+certificates:
+  - name: wildcard-example
+    certFile: certs/wildcard.pem
+    keyFile: certs/wildcard.key
+    autoRenew: false
+```
+
+| Key                        | Required | Description                                          |
+| -------------------------- | -------- | ---------------------------------------------------- |
+| `certificates[].name`      | yes      | Unique certificate name                              |
+| `certificates[].certFile`  | yes      | Path to PEM certificate file (relative to repo root) |
+| `certificates[].keyFile`   | yes      | Path to PEM private key file (relative to repo root) |
+| `certificates[].autoRenew` | no       | Enable auto-renewal                                  |
+
+Reference a certificate from a domain:
+
+```yaml
+domain:
+  host: app.example.com
+  port: 8000
+  https: true
+  certificateType: custom
+  certificate: wildcard-example
+```
 
 ## Compose Apps
 

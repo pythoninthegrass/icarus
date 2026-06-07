@@ -403,6 +403,13 @@
         "$ref": "#/$defs/destination_entry"
       }
     },
+    "certificates": {
+      "type": "array",
+      "description": "Custom SSL/TLS certificates for domain HTTPS",
+      "items": {
+        "$ref": "#/$defs/certificate_entry"
+      }
+    },
     "database": {
       "type": "array",
       "description": "Database resources managed by Dokploy (postgres, mysql, mariadb, mongo, redis)",
@@ -587,9 +594,14 @@
           "type": "string",
           "enum": [
             "none",
-            "letsencrypt"
+            "letsencrypt",
+            "custom"
           ],
           "description": "TLS certificate type"
+        },
+        "certificate": {
+          "type": "string",
+          "description": "Certificate name (from certificates section) when certificateType is custom"
         },
         "path": {
           "type": "string",
@@ -602,6 +614,45 @@
         "stripPath": {
           "type": "boolean",
           "description": "Strip path prefix before forwarding (default: false)"
+        }
+      },
+      "if": {
+        "properties": {
+          "certificateType": {
+            "const": "custom"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "certificate"
+        ]
+      }
+    },
+    "certificate_entry": {
+      "type": "object",
+      "required": [
+        "name",
+        "certFile",
+        "keyFile"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Unique certificate name (used for domain references)"
+        },
+        "certFile": {
+          "type": "string",
+          "description": "Path to PEM certificate file (relative to repo root)"
+        },
+        "keyFile": {
+          "type": "string",
+          "description": "Path to PEM private key file (relative to repo root)"
+        },
+        "autoRenew": {
+          "type": "boolean",
+          "description": "Enable auto-renewal for this certificate"
         }
       }
     },

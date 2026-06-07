@@ -142,6 +142,8 @@ def build_domain_payload(resource_id: str, dom: dict, *, compose: bool = False) 
             "certificateType": dom["certificateType"],
         }
     )
+    if dom.get("certificate"):
+        payload["customCertResolver"] = dom["certificate"]
     for key in ("path", "internalPath", "stripPath"):
         if key in dom:
             payload[key] = dom[key]
@@ -253,6 +255,26 @@ def build_destination_update_payload(destination_id: str, dest_def: dict) -> dic
         "destinationId": destination_id,
         **build_destination_create_payload(dest_def),
     }
+
+
+def build_certificate_create_payload(cert_def: dict, organization_id: str, repo_root: Path) -> dict:
+    """Build the API payload for creating a certificate."""
+    cert_path = Path(cert_def["certFile"])
+    key_path = Path(cert_def["keyFile"])
+    if not cert_path.is_absolute():
+        cert_path = repo_root / cert_path
+    if not key_path.is_absolute():
+        key_path = repo_root / key_path
+
+    payload: dict = {
+        "name": cert_def["name"],
+        "certificateData": cert_path.read_text(),
+        "privateKey": key_path.read_text(),
+        "organizationId": organization_id,
+    }
+    if "autoRenew" in cert_def:
+        payload["autoRenew"] = cert_def["autoRenew"]
+    return payload
 
 
 def build_backup_create_payload(

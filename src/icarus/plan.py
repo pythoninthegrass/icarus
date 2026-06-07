@@ -89,18 +89,21 @@ def _plan_initial_setup(cfg: dict, repo_root: Path, changes: list[dict]) -> None
         if domain_cfg:
             domains = domain_cfg if isinstance(domain_cfg, list) else [domain_cfg]
             for dom in domains:
+                dom_attrs: dict = {
+                    "host": dom["host"],
+                    "port": dom["port"],
+                    "https": dom.get("https", False),
+                    "certificateType": dom.get("certificateType", "none"),
+                }
+                if dom.get("certificate"):
+                    dom_attrs["certificate"] = dom["certificate"]
                 changes.append(
                     {
                         "action": "create",
                         "resource_type": "domain",
                         "name": dom["host"],
                         "parent": name,
-                        "attrs": {
-                            "host": dom["host"],
-                            "port": dom["port"],
-                            "https": dom.get("https", False),
-                            "certificateType": dom.get("certificateType", "none"),
-                        },
+                        "attrs": dom_attrs,
                     }
                 )
 
@@ -237,6 +240,21 @@ def _plan_initial_setup(cfg: dict, repo_root: Path, changes: list[dict]) -> None
                     "bucket": dest_def["bucket"],
                     "region": dest_def["region"],
                     "endpoint": dest_def["endpoint"],
+                },
+            }
+        )
+
+    for cert_def in cfg.get("certificates", []):
+        changes.append(
+            {
+                "action": "create",
+                "resource_type": "certificate",
+                "name": cert_def["name"],
+                "parent": None,
+                "attrs": {
+                    "certFile": cert_def["certFile"],
+                    "keyFile": cert_def["keyFile"],
+                    "autoRenew": cert_def.get("autoRenew"),
                 },
             }
         )

@@ -5597,3 +5597,272 @@ class TestReconcileDatabaseBackups:
         dokploy.reconcile_database_backups(client, cfg, state, state_file)
 
         client.post.assert_not_called()
+
+
+class TestBuildCertificateCreatePayload:
+    def test_reads_cert_and_key_files(self, tmp_path):
+        cert_file = tmp_path / "cert.pem"
+        key_file = tmp_path / "key.pem"
+        cert_file.write_text("-----BEGIN CERTIFICATE-----\nDATA\n-----END CERTIFICATE-----\n")
+        key_file.write_text("-----BEGIN PRIVATE KEY-----\nKEY\n-----END PRIVATE KEY-----\n")
+
+        cert_def = {
+            "name": "wildcard",
+            "certFile": str(cert_file),
+            "keyFile": str(key_file),
+            "autoRenew": False,
+        }
+        payload = dokploy.build_certificate_create_payload(cert_def, "org-123", tmp_path)
+
+        assert payload["name"] == "wildcard"
+        assert payload["certificateData"] == cert_file.read_text()
+        assert payload["privateKey"] == key_file.read_text()
+        assert payload["organizationId"] == "org-123"
+        assert payload["autoRenew"] is False
+
+    def test_relative_paths_resolved_from_repo_root(self, tmp_path):
+        certs_dir = tmp_path / "certs"
+        certs_dir.mkdir()
+        (certs_dir / "cert.pem").write_text("CERT")
+        (certs_dir / "key.pem").write_text("KEY")
+
+        cert_def = {
+            "name": "test",
+            "certFile": "certs/cert.pem",
+            "keyFile": "certs/key.pem",
+        }
+        payload = dokploy.build_certificate_create_payload(cert_def, "org-1", tmp_path)
+
+        assert payload["certificateData"] == "CERT"
+        assert payload["privateKey"] == "KEY"
+
+    def test_auto_renew_defaults_to_none(self, tmp_path):
+        (tmp_path / "c.pem").write_text("C")
+        (tmp_path / "k.pem").write_text("K")
+
+        cert_def = {"name": "x", "certFile": "c.pem", "keyFile": "k.pem"}
+        payload = dokploy.build_certificate_create_payload(cert_def, "org-1", tmp_path)
+
+        assert payload.get("autoRenew") is None
+
+
+class TestBuildDomainPayloadCustomCert:
+    def test_custom_cert_includes_resolver(self):
+        dom = {
+            "host": "app.example.com",
+            "port": 8000,
+            "https": True,
+            "certificateType": "custom",
+            "certificate": "wildcard-example",
+        }
+        payload = dokploy.build_domain_payload("app-1", dom)
+
+        assert payload["certificateType"] == "custom"
+        assert payload["customCertResolver"] == "wildcard-example"
+
+    def test_letsencrypt_no_resolver(self):
+        dom = {
+            "host": "app.example.com",
+            "port": 8000,
+            "https": True,
+            "certificateType": "letsencrypt",
+        }
+        payload = dokploy.build_domain_payload("app-1", dom)
+
+        assert payload["certificateType"] == "letsencrypt"
+        assert "customCertResolver" not in payload
+
+
+class TestCmdSetupCertificates:
+    def _make_mock_client(self):
+        client = MagicMock()
+
+        def fake_post(endpoint, payload=None):
+            if endpoint == "project.create":
+                return {
+                    "project": {"projectId": "proj-1", "organizationId": "org-1"},
+                    "environment": {"environmentId": "env-1"},
+                }
+            if endpoint == "application.create":
+                name = (payload or {}).get("name", "app")
+                return {"applicationId": f"app-{name}-id", "appName": f"app-{name}"}
+            if endpoint == "certificates.create":
+                return {"certificateId": "cert-new-id"}
+            return {}
+
+        client.post = MagicMock(side_effect=fake_post)
+        client.get = MagicMock(return_value=[])
+        return client
+
+    def test_certificates_created_during_setup(self, tmp_path, certificate_config):
+        state_file = tmp_path / ".dokploy-state" / "test.json"
+        certs_dir = tmp_path / "certs"
+        certs_dir.mkdir()
+        (certs_dir / "wildcard.pem").write_text("CERT_DATA")
+        (certs_dir / "wildcard.key").write_text("KEY_DATA")
+        client = self._make_mock_client()
+
+        dokploy.cmd_setup(client, certificate_config, state_file, repo_root=tmp_path)
+
+        create_calls = [c for c in client.post.call_args_list if c[0][0] == "certificates.create"]
+        assert len(create_calls) == 1
+        assert create_calls[0][0][1]["name"] == "wildcard-example"
+
+    def test_certificate_state_saved(self, tmp_path, certificate_config):
+        state_file = tmp_path / ".dokploy-state" / "test.json"
+        certs_dir = tmp_path / "certs"
+        certs_dir.mkdir()
+        (certs_dir / "wildcard.pem").write_text("CERT_DATA")
+        (certs_dir / "wildcard.key").write_text("KEY_DATA")
+        client = self._make_mock_client()
+
+        dokploy.cmd_setup(client, certificate_config, state_file, repo_root=tmp_path)
+
+        state = json.loads(state_file.read_text())
+        assert "certificates" in state
+        assert "wildcard-example" in state["certificates"]
+        assert state["certificates"]["wildcard-example"]["certificateId"] == "cert-new-id"
+
+    def test_existing_certificate_reused(self, tmp_path, certificate_config):
+        state_file = tmp_path / ".dokploy-state" / "test.json"
+        certs_dir = tmp_path / "certs"
+        certs_dir.mkdir()
+        (certs_dir / "wildcard.pem").write_text("CERT_DATA")
+        (certs_dir / "wildcard.key").write_text("KEY_DATA")
+        client = self._make_mock_client()
+        client.get = MagicMock(
+            side_effect=lambda endpoint, params=None: (
+                [{"certificateId": "cert-existing", "name": "wildcard-example"}] if endpoint == "certificates.all" else []
+            )
+        )
+
+        dokploy.cmd_setup(client, certificate_config, state_file, repo_root=tmp_path)
+
+        create_calls = [c for c in client.post.call_args_list if c[0][0] == "certificates.create"]
+        assert len(create_calls) == 0
+
+
+class TestReconcileCertificates:
+    def test_creates_new_certificate(self, tmp_path):
+        client = MagicMock()
+        client.get.return_value = []
+        client.post.return_value = {"certificateId": "cert-new"}
+        cfg = {
+            "certificates": [
+                {
+                    "name": "wildcard",
+                    "certFile": "cert.pem",
+                    "keyFile": "key.pem",
+                }
+            ],
+        }
+        (tmp_path / "cert.pem").write_text("CERT")
+        (tmp_path / "key.pem").write_text("KEY")
+        state = {"certificates": {}, "organizationId": "org-1"}
+        state_file = MagicMock()
+
+        dokploy.reconcile_certificates(client, cfg, state, state_file, repo_root=tmp_path)
+
+        create_calls = [c for c in client.post.call_args_list if c[0][0] == "certificates.create"]
+        assert len(create_calls) == 1
+
+    def test_skips_existing_certificate(self):
+        client = MagicMock()
+        client.get.return_value = [{"certificateId": "cert-1", "name": "wildcard"}]
+        cfg = {
+            "certificates": [
+                {
+                    "name": "wildcard",
+                    "certFile": "cert.pem",
+                    "keyFile": "key.pem",
+                }
+            ],
+        }
+        state = {"certificates": {"wildcard": {"certificateId": "cert-1"}}, "organizationId": "org-1"}
+        state_file = MagicMock()
+
+        dokploy.reconcile_certificates(client, cfg, state, state_file, repo_root=Path("/tmp"))
+
+        create_calls = [c for c in client.post.call_args_list if c[0][0] == "certificates.create"]
+        assert len(create_calls) == 0
+
+    def test_skips_when_no_certificates(self):
+        client = MagicMock()
+        cfg = {}
+        state = {}
+        state_file = MagicMock()
+
+        dokploy.reconcile_certificates(client, cfg, state, state_file, repo_root=Path("/tmp"))
+
+        client.post.assert_not_called()
+
+
+class TestPlanCertificates:
+    def test_initial_setup_shows_certificate_creates(self, certificate_config, tmp_path):
+        changes = []
+        dokploy._plan_initial_setup(certificate_config, tmp_path, changes)
+
+        cert_changes = [c for c in changes if c["resource_type"] == "certificate"]
+        assert len(cert_changes) == 1
+        assert cert_changes[0]["action"] == "create"
+        assert cert_changes[0]["name"] == "wildcard-example"
+
+    def test_initial_setup_domain_shows_custom_cert(self, certificate_config, tmp_path):
+        changes = []
+        dokploy._plan_initial_setup(certificate_config, tmp_path, changes)
+
+        domain_changes = [c for c in changes if c["resource_type"] == "domain"]
+        assert len(domain_changes) == 1
+        assert domain_changes[0]["attrs"]["certificateType"] == "custom"
+        assert domain_changes[0]["attrs"]["certificate"] == "wildcard-example"
+
+
+class TestDomainReconciliationCustomCert:
+    def test_reconcile_domain_with_custom_cert(self):
+        client = MagicMock()
+        client.post.return_value = {"domainId": "dom-1"}
+        desired = [
+            {
+                "host": "app.example.com",
+                "port": 8000,
+                "https": True,
+                "certificateType": "custom",
+                "certificate": "wildcard-example",
+            }
+        ]
+        result = dokploy.reconcile_domains(client, "app-1", [], desired)
+
+        create_calls = [c for c in client.post.call_args_list if c[0][0] == "domain.create"]
+        assert len(create_calls) == 1
+        payload = create_calls[0][0][1]
+        assert payload["certificateType"] == "custom"
+        assert payload["customCertResolver"] == "wildcard-example"
+
+    def test_reconcile_detects_cert_type_change(self):
+        client = MagicMock()
+        client.post.return_value = {}
+        existing = [
+            {
+                "host": "app.example.com",
+                "port": 8000,
+                "https": True,
+                "certificateType": "letsencrypt",
+                "domainId": "dom-1",
+            }
+        ]
+        desired = [
+            {
+                "host": "app.example.com",
+                "port": 8000,
+                "https": True,
+                "certificateType": "custom",
+                "certificate": "wildcard-example",
+            }
+        ]
+        dokploy.reconcile_domains(client, "app-1", existing, desired)
+
+        update_calls = [c for c in client.post.call_args_list if c[0][0] == "domain.update"]
+        assert len(update_calls) == 1
+        payload = update_calls[0][0][1]
+        assert payload["certificateType"] == "custom"
+        assert payload["customCertResolver"] == "wildcard-example"
