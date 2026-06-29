@@ -189,4 +189,5 @@ def select_container(containers: list[dict], exited: bool, for_exec: bool = Fals
             sys.exit(1)
         return running[0]
     else:
-        return containers[0]
+        running = [c for c in containers if c["state"] == "running"]
+        return running[0] if running else containers[0]
