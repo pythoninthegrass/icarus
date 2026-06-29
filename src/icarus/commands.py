@@ -565,6 +565,8 @@ def cmd_env(
     env_file = env_file_override or Path(os.environ.get("DOTENV_FILE", str(repo_root / ".env")))
     apps_by_name = {a["name"]: a for a in cfg["apps"]}
 
+    env_targets_set = set(env_targets)
+
     if env_targets:
         if not env_file.exists():
             print(f"ERROR: {env_file} not found.")
@@ -578,9 +580,19 @@ def cmd_env(
         for name in env_targets:
             app_info = state["apps"][name]
             resolved = resolve_refs(filtered, state)
+
+            # Merge per-app env: append it before pushing so the single
+            # saveEnvironment call carries both shared and per-app vars.
+            # Without this, a second saveEnvironment call (second loop below)
+            # would replace the shared vars entirely.
+            app_def = apps_by_name[name]
+            custom_env = app_def.get("env")
+            if custom_env:
+                custom_resolved = resolve_refs(custom_env, state)
+                resolved = (resolved.rstrip("\n") + "\n" + custom_resolved).lstrip("\n")
+
             if app_info.get("source") == "compose":
                 compose_id = app_info["composeId"]
-                app_def = apps_by_name[name]
                 compose_content = resolve_compose_file(app_def, repo_root)
                 print(f"Pushing env + compose file to {name}...")
                 client.post(
@@ -607,12 +619,16 @@ def cmd_env(
                     },
                 )
 
-    # Push per-app custom env (with {ref} resolution)
+    # Push per-app custom env (with {ref} resolution).
+    # Skip apps already handled above via env_targets — their per-app env was
+    # merged into the shared push and a second saveEnvironment would overwrite it.
     for app_def in cfg["apps"]:
         custom_env = app_def.get("env")
         if not custom_env:
             continue
         name = app_def["name"]
+        if name in env_targets_set:
+            continue
         resolved = resolve_refs(custom_env, state)
         app_info = state["apps"][name]
         if is_compose(app_def):
