@@ -118,7 +118,7 @@ Do NOT hand-align tables — column math is error-prone and markdownlint rejects
 ## When Modifying
 
 - If `dokploy.yml` structure changes: update `schemas/dokploy.schema.json`, `docs/configuration.md`, and `dokploy.yml.example`
-- If API behavior changes: update `docs/api-notes.md`
+- If API behavior changes: update `docs/api.md`
 - If test data changes: update YAML files in `tests/fixtures/`, not inline dicts
 - Example configs in `examples/` should validate against the schema
 - NEVER add section comments (e.g. `# --- Section Name ---`, `# == Foo ==`) to any code; use class/function structure and docstrings for organization

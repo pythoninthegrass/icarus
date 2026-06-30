@@ -262,7 +262,7 @@ The monitor workflow can also be triggered manually via `workflow_dispatch` with
 
 ## API Notes
 
-See [docs/api-notes.md](docs/api-notes.md) for Dokploy API quirks and gotchas.
+See [docs/api.md](docs/api.md) for Dokploy API quirks and gotchas.
 
 ## Contributing
 

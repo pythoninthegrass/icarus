@@ -19,6 +19,9 @@ from icarus.env import (
     _is_env_excluded,
     filter_env,
     get_env_excludes,
+    merge_app_env,
+    parse_env_to_dict,
+    resolve_app_envs,
     resolve_env_for_push,
     resolve_refs,
 )
@@ -95,6 +98,8 @@ from icarus.ssh import (
     get_ssh_config,
     resolve_app_for_exec,
     select_container,
+    sync_service_envs,
+    update_service_env,
 )
 
 __all__ = ["main"]

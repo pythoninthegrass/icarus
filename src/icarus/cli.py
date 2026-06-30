@@ -120,7 +120,7 @@ def main() -> None:
         case "apply":
             cmd_apply(repo_root, client, cfg, state_file, env_file_override=args.env_file)
         case "trigger":
-            cmd_trigger(client, cfg, state_file, redeploy=True)
+            cmd_trigger(client, cfg, state_file, repo_root=repo_root, env_file_override=args.env_file, redeploy=True)
         case "status":
             cmd_status(client, state_file)
         case "clean":

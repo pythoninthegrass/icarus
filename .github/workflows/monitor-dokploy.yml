@@ -83,7 +83,7 @@ jobs:
           - [ ] Review changelog for breaking API changes
           - [ ] Diff new spec against previous version: \`diff schemas/src/openapi_<prev>.json schemas/src/openapi_${TAG#v}.json\`
           - [ ] Verify icarus commands still work against the new API
-          - [ ] Update \`docs/api-notes.md\` if endpoints changed
+          - [ ] Update \`docs/api.md\` if endpoints changed
           - [ ] Update schema references in \`dokploy.yml.example\` if needed
           EOF
           )"

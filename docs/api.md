@@ -32,7 +32,7 @@ Requires the `x-api-key` header.
 
 - **`application.deploy`** triggers a fresh build and deploy. Returns an empty response body on success. Since v0.26.2, deployments execute asynchronously in the background — the endpoint returns immediately.
 
-- **`application.redeploy`**: Same as `application.deploy` but used for existing applications. Reuses the existing configuration and triggers a rebuild. Takes `{"applicationId": "..."}`. Used on the redeploy path when a state file already exists.
+- **`application.redeploy`**: Same as `application.deploy` but used for existing applications. Reuses the existing configuration and triggers a rebuild. Takes `{"applicationId": "..."}`. Used on the redeploy path when a state file already exists. **Caveat**: `application.redeploy` does not propagate env vars from the Dokploy database into the running Docker swarm service spec — it only rebuilds from the stored image. To ensure the live service has current env, `ic trigger` (the redeploy path) calls `docker service update --env-add` over SSH before triggering the rebuild. See [Docker service env sync](#docker-service-env-sync) below.
 
 - **`schedule.create`**: Creates a cron job attached to an application. Required fields: `name`, `cronExpression` (5-field cron), `command`. Also requires `scheduleType` (`application`) and `applicationId`. Optional: `shellType` (`bash` or `sh`, default `bash`), `timezone` (IANA string), `enabled` (boolean, default `true`). Returns the full schedule object including `scheduleId`.
 
@@ -72,6 +72,28 @@ Instead, the `logs` and `exec` commands use `docker-py` with SSH transport (`ssh
 ### SSH Transport
 
 `docker-py` with `use_ssh_client=True` spawns `ssh -- <host> docker system dial-stdio` as a subprocess, piping the Docker API through the user's local SSH binary. This uses existing SSH config, keys, and known_hosts.
+
+## Docker Service Env Sync
+
+`application.redeploy` restarts the existing swarm service image but does not
+re-apply env vars saved to Dokploy's DB via `application.saveEnvironment`.
+Running `ic env` followed by `ic trigger` would therefore leave containers with
+stale env.
+
+`ic trigger` (redeploy path only) reconciles this before triggering the rebuild:
+
+1. Resolves the same per-app env strings that `ic env` would push (via
+   `resolve_app_envs`).
+2. Opens a single SSH connection to the Dokploy host and calls
+   `docker service update --env-add KEY=VALUE … <appName>` for each application
+   app (compose apps re-read env on `compose.redeploy` and are skipped).
+
+`--env-add` is incremental — it only updates the specified keys and preserves
+all other service spec fields (mounts, networks, resources, labels).  The
+service restarts only if the effective env actually changed.
+
+If `DOKPLOY_SSH_HOST` is not set, the sync step is skipped with a warning and
+the redeploy proceeds normally.
 
 ## Health Check / Pre-flight
 

@@ -9,6 +9,9 @@ from icarus.config import config
 from icarus.env import (
     filter_env,
     get_env_excludes,
+    merge_app_env,
+    parse_env_to_dict,
+    resolve_app_envs,
     resolve_env_for_push,
     resolve_refs,
 )
@@ -59,6 +62,7 @@ from icarus.ssh import (
     get_ssh_config,
     resolve_app_for_exec,
     select_container,
+    sync_service_envs,
 )
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -581,25 +585,11 @@ def cmd_env(
             app_info = state["apps"][name]
             resolved = resolve_refs(filtered, state)
 
-            # Merge per-app env into the shared env before pushing so the
-            # single saveEnvironment call carries both shared and per-app vars.
-            # Per-app keys take precedence: strip them from shared first, then
-            # append per-app, so duplicate keys resolve correctly regardless of
-            # whether Dokploy uses first-wins or last-wins dotenv parsing.
             app_def = apps_by_name[name]
             custom_env = app_def.get("env")
             if custom_env:
                 custom_resolved = resolve_refs(custom_env, state)
-                override_keys = {
-                    line.split("=", 1)[0].strip()
-                    for line in custom_resolved.splitlines()
-                    if "=" in line and not line.startswith("#")
-                }
-                base_lines = [
-                    line for line in resolved.splitlines()
-                    if not ("=" in line and line.split("=", 1)[0].strip() in override_keys)
-                ]
-                resolved = "\n".join(base_lines).rstrip("\n") + "\n" + custom_resolved
+                resolved = merge_app_env(resolved, custom_resolved)
 
             if app_info.get("source") == "compose":
                 compose_id = app_info["composeId"]
@@ -669,8 +659,24 @@ def cmd_env(
     print("\nEnvironment variables pushed.")
 
 
-def cmd_trigger(client: DokployClient, cfg: dict, state_file: Path, *, redeploy: bool = False) -> None:
+def cmd_trigger(
+    client: DokployClient,
+    cfg: dict,
+    state_file: Path,
+    *,
+    repo_root: Path | None = None,
+    env_file_override: Path | None = None,
+    redeploy: bool = False,
+) -> None:
     state = load_state(state_file)
+
+    if redeploy and repo_root is not None:
+        env_file = env_file_override or Path(os.environ.get("DOTENV_FILE", str(repo_root / ".env")))
+        app_envs = resolve_app_envs(cfg, state, env_file)
+        if app_envs:
+            print("Syncing env into live service specs...")
+            sync_service_envs(state, app_envs)
+
     deploy_order = cfg["project"].get("deploy_order", [])
     endpoint = "application.redeploy" if redeploy else "application.deploy"
     action = "Redeploying" if redeploy else "Deploying"
@@ -733,7 +739,7 @@ def cmd_apply(
         reconcile_database_backups(client, cfg, load_state(state_file), state_file)
 
     print("\n==> Phase 4/4: trigger")
-    cmd_trigger(client, cfg, state_file, redeploy=is_redeploy)
+    cmd_trigger(client, cfg, state_file, repo_root=repo_root, env_file_override=env_file_override, redeploy=is_redeploy)
 
 
 def cmd_status(client: DokployClient, state_file: Path) -> None:

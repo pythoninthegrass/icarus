@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import docker
 import paramiko
+import shlex
 import sys
 from icarus.config import config
+from icarus.env import parse_env_to_dict
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -85,6 +87,64 @@ def _ssh_exec(ssh: paramiko.SSHClient, cmd: str) -> str:
     return stdout.read().decode().strip()
 
 
+def _open_ssh(host: str, user: str, port: int) -> paramiko.SSHClient:
+    """Open an SSH connection with automatic host-key acceptance."""
+    ssh = paramiko.SSHClient()
+    ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    ssh.connect(host, port=port, username=user)
+    return ssh
+
+
+def update_service_env(ssh: paramiko.SSHClient, app_name: str, env_vars: dict[str, str]) -> None:
+    """Apply env vars into a running Docker swarm service via --env-add.
+
+    Uses ``docker service update --env-add`` which is incremental: existing
+    spec fields (mounts, networks, resources, labels) are preserved and the
+    service only restarts if the effective env actually changed.
+    """
+    if not env_vars:
+        return
+    env_args = " ".join(f"--env-add {shlex.quote(f'{k}={v}')}" for k, v in env_vars.items())
+    _ssh_exec(ssh, f"docker service update {env_args} {shlex.quote(app_name)}")
+
+
+def sync_service_envs(state: dict, app_envs: dict[str, str]) -> None:
+    """Apply resolved env strings into live Docker swarm service specs over SSH.
+
+    Skips gracefully when DOKPLOY_SSH_HOST is not configured.  Only processes
+    application (non-compose) apps; compose apps re-read env on redeploy.
+    Opens a single SSH connection for all apps.
+    """
+    if not app_envs:
+        return
+
+    host: str = config("DOKPLOY_SSH_HOST", default="")  # type: ignore[assignment]
+    if not host:
+        print("  Sync: skipping (DOKPLOY_SSH_HOST not set)")
+        return
+
+    user: str = config("DOKPLOY_SSH_USER", default="root")  # type: ignore[assignment]
+    port_str: str = config("DOKPLOY_SSH_PORT", default="22")  # type: ignore[assignment]
+    ssh_port = int(port_str) if port_str else 22
+
+    ssh = _open_ssh(host, user or "root", ssh_port)
+    try:
+        for name, env_content in app_envs.items():
+            app_info = state["apps"].get(name, {})
+            if app_info.get("source") == "compose":
+                continue
+            app_name = app_info.get("appName", "")
+            if not app_name:
+                continue
+            env_vars = parse_env_to_dict(env_content)
+            if not env_vars:
+                continue
+            update_service_env(ssh, app_name, env_vars)
+            print(f"  Synced env into service {app_name}")
+    finally:
+        ssh.close()
+
+
 def cleanup_stale_routes(state: dict, cfg: dict) -> None:
     """Remove traefik configs and docker services for orphaned deployments.
 
@@ -108,11 +168,8 @@ def cleanup_stale_routes(state: dict, cfg: dict) -> None:
     ssh_user = user or "root"
     ssh_port = int(port) if port else 22
 
-    ssh = paramiko.SSHClient()
-    ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    ssh = _open_ssh(host, ssh_user, ssh_port)
     try:
-        ssh.connect(host, port=ssh_port, username=ssh_user)
-
         traefik_files: dict[str, str] = {}
         file_list = _ssh_exec(ssh, f"ls {TRAEFIK_DYNAMIC_DIR}/*.yml 2>/dev/null")
         for filepath in file_list.splitlines():

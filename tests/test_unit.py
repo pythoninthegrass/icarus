@@ -734,7 +734,11 @@ class TestUnifiedApply:
         monkeypatch.setattr(
             icarus_commands, "cmd_env", lambda client, cfg, sf, repo_root, env_file_override=None: calls.append("env")
         )
-        monkeypatch.setattr(icarus_commands, "cmd_trigger", lambda client, cfg, sf, redeploy=False: calls.append("trigger"))
+        monkeypatch.setattr(
+            icarus_commands,
+            "cmd_trigger",
+            lambda client, cfg, sf, repo_root=None, env_file_override=None, redeploy=False: calls.append("trigger"),
+        )
 
         dokploy.cmd_apply(
             repo_root=tmp_path,
@@ -757,7 +761,11 @@ class TestUnifiedApply:
         monkeypatch.setattr(
             icarus_commands, "cmd_env", lambda client, cfg, sf, repo_root, env_file_override=None: calls.append("env")
         )
-        monkeypatch.setattr(icarus_commands, "cmd_trigger", lambda client, cfg, sf, redeploy=False: calls.append("trigger"))
+        monkeypatch.setattr(
+            icarus_commands,
+            "cmd_trigger",
+            lambda client, cfg, sf, repo_root=None, env_file_override=None, redeploy=False: calls.append("trigger"),
+        )
         monkeypatch.setattr(icarus_commands, "validate_state", lambda client, state: True)
 
         dokploy.cmd_apply(
@@ -781,7 +789,11 @@ class TestUnifiedApply:
         monkeypatch.setattr(icarus_commands, "cmd_setup", lambda client, cfg, sf, repo_root=None: None)
         monkeypatch.setattr(icarus_commands, "cmd_env", lambda client, cfg, sf, repo_root, env_file_override=None: None)
         monkeypatch.setattr(
-            icarus_commands, "cmd_trigger", lambda client, cfg, sf, redeploy=False: trigger_kwargs.update(redeploy=redeploy)
+            icarus_commands,
+            "cmd_trigger",
+            lambda client, cfg, sf, repo_root=None, env_file_override=None, redeploy=False: trigger_kwargs.update(
+                redeploy=redeploy
+            ),
         )
         monkeypatch.setattr(icarus_commands, "validate_state", lambda client, state: True)
 
@@ -803,7 +815,11 @@ class TestUnifiedApply:
         monkeypatch.setattr(icarus_commands, "cmd_setup", lambda client, cfg, sf, repo_root=None: None)
         monkeypatch.setattr(icarus_commands, "cmd_env", lambda client, cfg, sf, repo_root, env_file_override=None: None)
         monkeypatch.setattr(
-            icarus_commands, "cmd_trigger", lambda client, cfg, sf, redeploy=False: trigger_kwargs.update(redeploy=redeploy)
+            icarus_commands,
+            "cmd_trigger",
+            lambda client, cfg, sf, repo_root=None, env_file_override=None, redeploy=False: trigger_kwargs.update(
+                redeploy=redeploy
+            ),
         )
 
         dokploy.cmd_apply(
@@ -822,7 +838,9 @@ class TestUnifiedApply:
         monkeypatch.setattr(icarus_commands, "cmd_check", lambda repo_root: None)
         monkeypatch.setattr(icarus_commands, "cmd_setup", lambda client, cfg, sf, repo_root=None: None)
         monkeypatch.setattr(icarus_commands, "cmd_env", lambda client, cfg, sf, repo_root, env_file_override=None: None)
-        monkeypatch.setattr(icarus_commands, "cmd_trigger", lambda client, cfg, sf, redeploy=False: None)
+        monkeypatch.setattr(
+            icarus_commands, "cmd_trigger", lambda client, cfg, sf, repo_root=None, env_file_override=None, redeploy=False: None
+        )
 
         dokploy.cmd_apply(
             repo_root=tmp_path,
@@ -851,7 +869,11 @@ class TestUnifiedApply:
         monkeypatch.setattr(
             icarus_commands, "cmd_env", lambda client, cfg, sf, repo_root, env_file_override=None: calls.append("env")
         )
-        monkeypatch.setattr(icarus_commands, "cmd_trigger", lambda client, cfg, sf, redeploy=False: calls.append("trigger"))
+        monkeypatch.setattr(
+            icarus_commands,
+            "cmd_trigger",
+            lambda client, cfg, sf, repo_root=None, env_file_override=None, redeploy=False: calls.append("trigger"),
+        )
 
         with pytest.raises(SystemExit):
             dokploy.cmd_apply(
@@ -948,7 +970,9 @@ class TestCleanupStaleRoutes:
 
         monkeypatch.setattr(icarus_commands, "cmd_check", lambda repo_root: None)
         monkeypatch.setattr(icarus_commands, "cmd_env", lambda client, cfg, sf, repo_root, env_file_override=None: None)
-        monkeypatch.setattr(icarus_commands, "cmd_trigger", lambda client, cfg, sf, redeploy=False: None)
+        monkeypatch.setattr(
+            icarus_commands, "cmd_trigger", lambda client, cfg, sf, repo_root=None, env_file_override=None, redeploy=False: None
+        )
         monkeypatch.setattr(icarus_commands, "validate_state", lambda client, state: True)
         monkeypatch.setattr(icarus_commands, "cleanup_stale_routes", lambda state, cfg: calls.append("cleanup"))
 
@@ -969,7 +993,9 @@ class TestCleanupStaleRoutes:
         monkeypatch.setattr(icarus_commands, "cmd_check", lambda repo_root: None)
         monkeypatch.setattr(icarus_commands, "cmd_setup", lambda client, cfg, sf, repo_root=None: None)
         monkeypatch.setattr(icarus_commands, "cmd_env", lambda client, cfg, sf, repo_root, env_file_override=None: None)
-        monkeypatch.setattr(icarus_commands, "cmd_trigger", lambda client, cfg, sf, redeploy=False: None)
+        monkeypatch.setattr(
+            icarus_commands, "cmd_trigger", lambda client, cfg, sf, repo_root=None, env_file_override=None, redeploy=False: None
+        )
         monkeypatch.setattr(icarus_commands, "cleanup_stale_routes", lambda state, cfg: calls.append("cleanup"))
 
         dokploy.cmd_apply(
@@ -2868,7 +2894,9 @@ class TestCmdApplyCallsReconcileMounts:
 
         monkeypatch.setattr(icarus_commands, "cmd_check", lambda repo_root: None)
         monkeypatch.setattr(icarus_commands, "cmd_env", lambda client, cfg, sf, repo_root, env_file_override=None: None)
-        monkeypatch.setattr(icarus_commands, "cmd_trigger", lambda client, cfg, sf, redeploy=False: None)
+        monkeypatch.setattr(
+            icarus_commands, "cmd_trigger", lambda client, cfg, sf, repo_root=None, env_file_override=None, redeploy=False: None
+        )
         monkeypatch.setattr(icarus_commands, "validate_state", lambda client, state: True)
         monkeypatch.setattr(icarus_commands, "cleanup_stale_routes", lambda state, cfg: None)
         monkeypatch.setattr(icarus_commands, "reconcile_app_domains", lambda client, cfg, state, sf: None)
@@ -2896,7 +2924,9 @@ class TestCmdApplyCallsReconcileMounts:
         monkeypatch.setattr(icarus_commands, "cmd_check", lambda repo_root: None)
         monkeypatch.setattr(icarus_commands, "cmd_setup", lambda client, cfg, sf, repo_root=None: None)
         monkeypatch.setattr(icarus_commands, "cmd_env", lambda client, cfg, sf, repo_root, env_file_override=None: None)
-        monkeypatch.setattr(icarus_commands, "cmd_trigger", lambda client, cfg, sf, redeploy=False: None)
+        monkeypatch.setattr(
+            icarus_commands, "cmd_trigger", lambda client, cfg, sf, repo_root=None, env_file_override=None, redeploy=False: None
+        )
         monkeypatch.setattr(
             icarus_commands,
             "reconcile_app_mounts",
@@ -3473,7 +3503,9 @@ class TestCmdApplyReconcileAppSettings:
         monkeypatch.setattr(icarus_commands, "cmd_check", lambda repo_root: None)
         monkeypatch.setattr(icarus_commands, "validate_state", lambda client, state: True)
         monkeypatch.setattr(icarus_commands, "cmd_env", lambda client, cfg, sf, repo_root, env_file_override=None: None)
-        monkeypatch.setattr(icarus_commands, "cmd_trigger", lambda client, cfg, sf, redeploy=False: None)
+        monkeypatch.setattr(
+            icarus_commands, "cmd_trigger", lambda client, cfg, sf, repo_root=None, env_file_override=None, redeploy=False: None
+        )
         monkeypatch.setattr(icarus_commands, "cleanup_stale_routes", lambda state, cfg: None)
         monkeypatch.setattr(icarus_commands, "reconcile_app_domains", lambda client, cfg, state, sf: None)
         monkeypatch.setattr(icarus_commands, "reconcile_app_schedules", lambda client, cfg, state, sf: None)
@@ -3652,7 +3684,9 @@ class TestCmdApplyReconcilePorts:
         monkeypatch.setattr(icarus_commands, "cmd_check", lambda repo_root: None)
         monkeypatch.setattr(icarus_commands, "validate_state", lambda client, state: True)
         monkeypatch.setattr(icarus_commands, "cmd_env", lambda client, cfg, sf, repo_root, env_file_override=None: None)
-        monkeypatch.setattr(icarus_commands, "cmd_trigger", lambda client, cfg, sf, redeploy=False: None)
+        monkeypatch.setattr(
+            icarus_commands, "cmd_trigger", lambda client, cfg, sf, repo_root=None, env_file_override=None, redeploy=False: None
+        )
         monkeypatch.setattr(icarus_commands, "cleanup_stale_routes", lambda state, cfg: None)
         monkeypatch.setattr(icarus_commands, "reconcile_app_domains", lambda client, cfg, state, sf: None)
         monkeypatch.setattr(icarus_commands, "reconcile_app_schedules", lambda client, cfg, state, sf: None)
@@ -3680,7 +3714,9 @@ class TestCmdApplyReconcilePorts:
         monkeypatch.setattr(icarus_commands, "cmd_check", lambda repo_root: None)
         monkeypatch.setattr(icarus_commands, "cmd_setup", lambda client, cfg, sf, repo_root=None: None)
         monkeypatch.setattr(icarus_commands, "cmd_env", lambda client, cfg, sf, repo_root, env_file_override=None: None)
-        monkeypatch.setattr(icarus_commands, "cmd_trigger", lambda client, cfg, sf, redeploy=False: None)
+        monkeypatch.setattr(
+            icarus_commands, "cmd_trigger", lambda client, cfg, sf, repo_root=None, env_file_override=None, redeploy=False: None
+        )
         monkeypatch.setattr(
             icarus_commands,
             "reconcile_app_ports",
@@ -4489,7 +4525,9 @@ class TestCmdApplyReconcileSecurity:
 
         monkeypatch.setattr(icarus_commands, "cmd_check", lambda repo_root: None)
         monkeypatch.setattr(icarus_commands, "cmd_env", lambda client, cfg, sf, repo_root, env_file_override=None: None)
-        monkeypatch.setattr(icarus_commands, "cmd_trigger", lambda client, cfg, sf, redeploy=False: None)
+        monkeypatch.setattr(
+            icarus_commands, "cmd_trigger", lambda client, cfg, sf, repo_root=None, env_file_override=None, redeploy=False: None
+        )
         monkeypatch.setattr(icarus_commands, "validate_state", lambda client, state: True)
         monkeypatch.setattr(icarus_commands, "cleanup_stale_routes", lambda state, cfg: None)
         monkeypatch.setattr(icarus_commands, "reconcile_app_domains", lambda client, cfg, state, sf: None)
@@ -4523,7 +4561,9 @@ class TestCmdApplyReconcileSecurity:
         monkeypatch.setattr(icarus_commands, "cmd_check", lambda repo_root: None)
         monkeypatch.setattr(icarus_commands, "cmd_setup", lambda client, cfg, sf, repo_root=None: None)
         monkeypatch.setattr(icarus_commands, "cmd_env", lambda client, cfg, sf, repo_root, env_file_override=None: None)
-        monkeypatch.setattr(icarus_commands, "cmd_trigger", lambda client, cfg, sf, redeploy=False: None)
+        monkeypatch.setattr(
+            icarus_commands, "cmd_trigger", lambda client, cfg, sf, repo_root=None, env_file_override=None, redeploy=False: None
+        )
         monkeypatch.setattr(
             icarus_commands,
             "reconcile_app_security",
@@ -4947,7 +4987,9 @@ class TestCmdApplyReconcileRedirects:
         monkeypatch.setattr(icarus_commands, "cmd_check", lambda repo_root: None)
         monkeypatch.setattr(icarus_commands, "validate_state", lambda client, state: True)
         monkeypatch.setattr(icarus_commands, "cmd_env", lambda client, cfg, sf, repo_root, env_file_override=None: None)
-        monkeypatch.setattr(icarus_commands, "cmd_trigger", lambda client, cfg, sf, redeploy=False: None)
+        monkeypatch.setattr(
+            icarus_commands, "cmd_trigger", lambda client, cfg, sf, repo_root=None, env_file_override=None, redeploy=False: None
+        )
         monkeypatch.setattr(icarus_commands, "cleanup_stale_routes", lambda state, cfg: None)
         monkeypatch.setattr(icarus_commands, "reconcile_app_domains", lambda client, cfg, state, sf: None)
         monkeypatch.setattr(icarus_commands, "reconcile_app_schedules", lambda client, cfg, state, sf: None)
@@ -4980,7 +5022,9 @@ class TestCmdApplyReconcileRedirects:
         monkeypatch.setattr(icarus_commands, "cmd_check", lambda repo_root: None)
         monkeypatch.setattr(icarus_commands, "cmd_setup", lambda client, cfg, sf, repo_root=None: None)
         monkeypatch.setattr(icarus_commands, "cmd_env", lambda client, cfg, sf, repo_root, env_file_override=None: None)
-        monkeypatch.setattr(icarus_commands, "cmd_trigger", lambda client, cfg, sf, redeploy=False: None)
+        monkeypatch.setattr(
+            icarus_commands, "cmd_trigger", lambda client, cfg, sf, repo_root=None, env_file_override=None, redeploy=False: None
+        )
         monkeypatch.setattr(
             icarus_commands,
             "reconcile_app_redirects",
@@ -5866,3 +5910,206 @@ class TestDomainReconciliationCustomCert:
         payload = update_calls[0][0][1]
         assert payload["certificateType"] == "custom"
         assert payload["customCertResolver"] == "wildcard-example"
+
+
+class TestMergeAppEnv:
+    def test_custom_keys_override_base(self):
+        base = "FOO=from_base\nBAR=keep\n"
+        custom = "FOO=from_custom\n"
+        result = dokploy.merge_app_env(base, custom)
+        assert "FOO=from_custom" in result
+        assert "FOO=from_base" not in result
+        assert "BAR=keep" in result
+
+    def test_no_custom_returns_base(self):
+        base = "FOO=bar\n"
+        result = dokploy.merge_app_env(base, "")
+        assert "FOO=bar" in result
+
+    def test_duplicate_keys_custom_wins(self):
+        base = "KEY=old\nOTHER=val\n"
+        custom = "KEY=new\n"
+        result = dokploy.merge_app_env(base, custom)
+        lines = [ln for ln in result.splitlines() if ln.startswith("KEY=")]
+        assert lines == ["KEY=new"]
+
+    def test_new_custom_keys_are_appended(self):
+        base = "FOO=bar\n"
+        custom = "NEW=thing\n"
+        result = dokploy.merge_app_env(base, custom)
+        assert "FOO=bar" in result
+        assert "NEW=thing" in result
+
+
+class TestParseEnvToDict:
+    def test_basic_parse(self):
+        result = dokploy.parse_env_to_dict("FOO=bar\nBAZ=qux\n")
+        assert result == {"FOO": "bar", "BAZ": "qux"}
+
+    def test_comments_and_blanks_skipped(self):
+        result = dokploy.parse_env_to_dict("# comment\n\nFOO=bar\n")
+        assert result == {"FOO": "bar"}
+
+    def test_value_with_equals(self):
+        result = dokploy.parse_env_to_dict("DB_URL=postgres://u:p@h/db?opt=1\n")
+        assert result == {"DB_URL": "postgres://u:p@h/db?opt=1"}
+
+    def test_last_wins_on_duplicates(self):
+        result = dokploy.parse_env_to_dict("KEY=first\nKEY=second\n")
+        assert result["KEY"] == "second"
+
+    def test_empty_returns_empty_dict(self):
+        assert dokploy.parse_env_to_dict("") == {}
+
+
+class TestResolveAppEnvs:
+    def test_env_target_app_resolved(self, tmp_path):
+        env_file = tmp_path / ".env"
+        env_file.write_text("FOO=bar\n")
+        cfg = {
+            "project": {"env_targets": ["app"]},
+            "apps": [{"name": "app"}],
+        }
+        state = {"apps": {"app": {"applicationId": "app-1", "appName": "app-gen"}}}
+        result = dokploy.resolve_app_envs(cfg, state, env_file)
+        assert "app" in result
+        assert "FOO=bar" in result["app"]
+
+    def test_per_app_env_only(self, tmp_path):
+        env_file = tmp_path / ".env"
+        env_file.write_text("SHARED=val\n")
+        cfg = {
+            "project": {"env_targets": []},
+            "apps": [{"name": "app", "env": "CUSTOM=thing\n"}],
+        }
+        state = {"apps": {"app": {"applicationId": "app-1", "appName": "app-gen"}}}
+        result = dokploy.resolve_app_envs(cfg, state, env_file)
+        assert "app" in result
+        assert "CUSTOM=thing" in result["app"]
+
+    def test_missing_env_file_skips_targets(self, tmp_path):
+        env_file = tmp_path / "nonexistent.env"
+        cfg = {
+            "project": {"env_targets": ["app"]},
+            "apps": [{"name": "app"}],
+        }
+        state = {"apps": {"app": {"applicationId": "app-1", "appName": "app-gen"}}}
+        result = dokploy.resolve_app_envs(cfg, state, env_file)
+        assert result == {}
+
+    def test_per_app_env_resolved_when_file_missing(self, tmp_path):
+        env_file = tmp_path / "nonexistent.env"
+        cfg = {
+            "project": {"env_targets": []},
+            "apps": [{"name": "app", "env": "CUSTOM=thing\n"}],
+        }
+        state = {"apps": {"app": {"applicationId": "app-1", "appName": "app-gen"}}}
+        result = dokploy.resolve_app_envs(cfg, state, env_file)
+        assert "app" in result
+        assert "CUSTOM=thing" in result["app"]
+
+    def test_ref_resolution(self, tmp_path):
+        env_file = tmp_path / ".env"
+        env_file.write_text("")
+        cfg = {
+            "project": {"env_targets": []},
+            "apps": [{"name": "web", "env": "REDIS_URL=redis://{redis}:6379/0\n"}],
+        }
+        state = {
+            "apps": {
+                "web": {"applicationId": "app-web", "appName": "web-gen"},
+                "redis": {"applicationId": "app-redis", "appName": "redis-abc123"},
+            }
+        }
+        result = dokploy.resolve_app_envs(cfg, state, env_file)
+        assert "web" in result
+        assert "redis-abc123" in result["web"]
+
+    def test_no_env_no_targets_returns_empty(self, tmp_path):
+        env_file = tmp_path / ".env"
+        env_file.write_text("FOO=bar\n")
+        cfg = {
+            "project": {},
+            "apps": [{"name": "app"}],
+        }
+        state = {"apps": {"app": {"applicationId": "app-1", "appName": "app-gen"}}}
+        result = dokploy.resolve_app_envs(cfg, state, env_file)
+        assert result == {}
+
+    def test_per_app_merge_into_shared(self, tmp_path):
+        env_file = tmp_path / ".env"
+        env_file.write_text("SHARED=yes\nFOO=from_shared\n")
+        cfg = {
+            "project": {"env_targets": ["app"]},
+            "apps": [{"name": "app", "env": "FOO=from_app\n"}],
+        }
+        state = {"apps": {"app": {"applicationId": "app-1", "appName": "app-gen"}}}
+        result = dokploy.resolve_app_envs(cfg, state, env_file)
+        assert "FOO=from_app" in result["app"]
+        assert "FOO=from_shared" not in result["app"]
+        assert "SHARED=yes" in result["app"]
+
+
+class TestSyncServiceEnvs:
+    def test_skips_when_ssh_host_unset(self, monkeypatch, capsys):
+        monkeypatch.setattr(icarus_ssh, "config", MagicMock(side_effect=lambda key, default="": default))
+        state = {"apps": {"app": {"applicationId": "app-1", "appName": "app-gen"}}}
+        dokploy.sync_service_envs(state, {"app": "FOO=bar\n"})
+        output = capsys.readouterr().out
+        assert "skip" in output.lower()
+
+    def test_calls_docker_service_update(self, monkeypatch):
+        def fake_config(key, default=""):
+            if key == "DOKPLOY_SSH_HOST":
+                return "server.example.com"
+            return default
+
+        monkeypatch.setattr(icarus_ssh, "config", MagicMock(side_effect=fake_config))
+
+        stdout_mock = MagicMock()
+        stdout_mock.read.return_value = b""
+        ssh_mock = MagicMock()
+        ssh_mock.exec_command.return_value = (None, stdout_mock, None)
+        ssh_class = MagicMock(return_value=ssh_mock)
+        monkeypatch.setattr(icarus_ssh.paramiko, "SSHClient", ssh_class)
+
+        state = {"apps": {"app": {"applicationId": "app-1", "appName": "app-gen"}}}
+        dokploy.sync_service_envs(state, {"app": "FOO=bar\n"})
+
+        commands_run = [c[0][0] for c in ssh_mock.exec_command.call_args_list]
+        assert any("docker service update" in cmd and "--env-add" in cmd and "app-gen" in cmd for cmd in commands_run)
+
+    def test_skips_compose_apps(self, monkeypatch):
+        def fake_config(key, default=""):
+            if key == "DOKPLOY_SSH_HOST":
+                return "server.example.com"
+            return default
+
+        monkeypatch.setattr(icarus_ssh, "config", MagicMock(side_effect=fake_config))
+
+        stdout_mock = MagicMock()
+        stdout_mock.read.return_value = b""
+        ssh_mock = MagicMock()
+        ssh_mock.exec_command.return_value = (None, stdout_mock, None)
+        ssh_class = MagicMock(return_value=ssh_mock)
+        monkeypatch.setattr(icarus_ssh.paramiko, "SSHClient", ssh_class)
+
+        state = {"apps": {"app": {"composeId": "c-1", "appName": "app-gen", "source": "compose"}}}
+        dokploy.sync_service_envs(state, {"app": "FOO=bar\n"})
+
+        commands_run = [c[0][0] for c in ssh_mock.exec_command.call_args_list]
+        assert not any("docker service update" in cmd for cmd in commands_run)
+
+    def test_empty_app_envs_no_ssh(self, monkeypatch):
+        ssh_class = MagicMock()
+        monkeypatch.setattr(
+            icarus_ssh,
+            "config",
+            MagicMock(side_effect=lambda key, default="": "host.example.com" if key == "DOKPLOY_SSH_HOST" else default),
+        )
+        monkeypatch.setattr(icarus_ssh.paramiko, "SSHClient", ssh_class)
+
+        state = {"apps": {}}
+        dokploy.sync_service_envs(state, {})
+
+        ssh_class.assert_not_called()

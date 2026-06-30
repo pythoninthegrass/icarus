@@ -742,6 +742,66 @@ class TestCmdTrigger:
         assert len(deploy_route.calls) == 1
         assert len(redeploy_route.calls) == 0
 
+    def test_redeploy_calls_sync_service_envs(self, tmp_path, minimal_config, monkeypatch):
+        """cmd_trigger with redeploy=True calls sync_service_envs before deploying."""
+        from icarus import commands as icarus_commands
+
+        sync_calls = []
+        monkeypatch.setattr(
+            icarus_commands,
+            "sync_service_envs",
+            lambda state, app_envs: sync_calls.append(app_envs),
+        )
+        monkeypatch.setattr(
+            icarus_commands,
+            "resolve_app_envs",
+            lambda cfg, state, env_file: {"app": "FOO=bar\n"},
+        )
+
+        state = {
+            "projectId": "proj-1",
+            "environmentId": "env-1",
+            "apps": {"app": {"applicationId": "app-1", "appName": "app-gen"}},
+        }
+        state_file = tmp_path / ".dokploy-state" / "test.json"
+        self._write_state(state_file, state)
+
+        router = respx.Router()
+        router.post(f"{BASE_URL}/api/application.redeploy").mock(return_value=httpx.Response(200, content=b""))
+        client = _make_client(router)
+
+        dokploy.cmd_trigger(client, minimal_config, state_file, repo_root=tmp_path, redeploy=True)
+
+        assert len(sync_calls) == 1
+        assert "app" in sync_calls[0]
+
+    def test_fresh_deploy_skips_sync_service_envs(self, tmp_path, minimal_config, monkeypatch):
+        """cmd_trigger without redeploy=True does not call sync_service_envs."""
+        from icarus import commands as icarus_commands
+
+        sync_calls = []
+        monkeypatch.setattr(
+            icarus_commands,
+            "sync_service_envs",
+            lambda state, app_envs: sync_calls.append(app_envs),
+        )
+
+        state = {
+            "projectId": "proj-1",
+            "environmentId": "env-1",
+            "apps": {"app": {"applicationId": "app-1", "appName": "app-gen"}},
+        }
+        state_file = tmp_path / ".dokploy-state" / "test.json"
+        self._write_state(state_file, state)
+
+        router = respx.Router()
+        router.post(f"{BASE_URL}/api/application.deploy").mock(return_value=httpx.Response(200, content=b""))
+        client = _make_client(router)
+
+        dokploy.cmd_trigger(client, minimal_config, state_file, repo_root=tmp_path)
+
+        assert len(sync_calls) == 0
+
 
 # ---------------------------------------------------------------------------
 # cmd_status tests

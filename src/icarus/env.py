@@ -88,3 +88,72 @@ def resolve_refs(template: str, state: dict) -> str:
         return match.group(0)  # leave unresolved refs as-is
 
     return re.sub(r"\{(\w+)\}", replacer, template)
+
+
+def merge_app_env(base: str, custom: str) -> str:
+    """Merge per-app env into a shared env string, with per-app keys winning.
+
+    Strips keys from ``base`` that ``custom`` overrides, then appends
+    ``custom``.  Duplicate keys always resolve to the ``custom`` value
+    regardless of whether the dotenv parser uses first-wins or last-wins
+    semantics.
+    """
+    if not custom:
+        return base
+    override_keys = {line.split("=", 1)[0].strip() for line in custom.splitlines() if "=" in line and not line.startswith("#")}
+    base_lines = [line for line in base.splitlines() if not ("=" in line and line.split("=", 1)[0].strip() in override_keys)]
+    return "\n".join(base_lines).rstrip("\n") + "\n" + custom
+
+
+def parse_env_to_dict(content: str) -> dict[str, str]:
+    """Parse a dotenv-format string into a dict.
+
+    Skips comments and blank lines; splits on the first ``=``; last-wins on
+    duplicate keys.
+    """
+    result: dict[str, str] = {}
+    for line in content.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if "=" not in stripped:
+            continue
+        key, _, value = stripped.partition("=")
+        result[key.strip()] = value
+    return result
+
+
+def resolve_app_envs(cfg: dict, state: dict, env_file: Path) -> dict[str, str]:
+    """Build a mapping of app_config_name → resolved dotenv string.
+
+    Mirrors cmd_env's resolution logic so that cmd_trigger can push the same
+    env into the live Docker service specs.  Returns only apps that have env
+    vars to push; returns an empty dict when nothing is configured.
+    """
+    result: dict[str, str] = {}
+    env_targets: list[str] = cfg.get("project", {}).get("env_targets", [])
+    env_targets_set = set(env_targets)
+    apps_by_name = {a["name"]: a for a in cfg.get("apps", [])}
+
+    if env_targets and env_file.exists():
+        exclude_patterns = get_env_excludes()
+        filtered = resolve_env_for_push(env_file, exclude_patterns)
+        for name in env_targets:
+            resolved = resolve_refs(filtered, state)
+            app_def = apps_by_name[name]
+            custom_env = app_def.get("env")
+            if custom_env:
+                custom_resolved = resolve_refs(custom_env, state)
+                resolved = merge_app_env(resolved, custom_resolved)
+            result[name] = resolved
+
+    for app_def in cfg.get("apps", []):
+        custom_env = app_def.get("env")
+        if not custom_env:
+            continue
+        name = app_def["name"]
+        if name in env_targets_set:
+            continue
+        result[name] = resolve_refs(custom_env, state)
+
+    return result
