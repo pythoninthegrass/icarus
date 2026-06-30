@@ -124,6 +124,20 @@ Do NOT hand-align tables — column math is error-prone and markdownlint rejects
 - NEVER add section comments (e.g. `# --- Section Name ---`, `# == Foo ==`) to any code; use class/function structure and docstrings for organization
 - NEVER create new test files; add tests to the existing files in `tests/` (e.g. `test_unit.py`, `test_integration.py`, `test_e2e.py`, `test_property.py`)
 
+## Version Control
+
+When a commit resolves a GitHub issue and is pushed directly to `main` (no PR), add a closing trailer so GitHub auto-closes the issue:
+
+```text
+feat(compose): support sourceType: github for compose apps
+
+...body...
+
+Closes #18
+```
+
+Use `Closes #N` for issues that are fully resolved by the commit. Use `Refs #N` when the commit is related but does not fully close the issue.
+
 ## Worktrunk (worktree cleanup)
 
 **CRITICAL**: Before running `wt remove`, you MUST first change your working directory to the main repo:
