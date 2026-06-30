@@ -121,7 +121,7 @@ Do NOT hand-align tables — column math is error-prone and markdownlint rejects
 - If API behavior changes: update `docs/api.md`
 - If test data changes: update YAML files in `tests/fixtures/`, not inline dicts
 - Example configs in `examples/` should validate against the schema
-- NEVER add section comments (e.g. `# --- Section Name ---`, `# == Foo ==`) to any code; use class/function structure and docstrings for organization
+- NEVER add section comments (e.g. `# --- Section Name ---`, `# == Foo ==`, `# -----...-----`) to any code unless explicitly asked; use class/function structure and docstrings for organization
 - NEVER create new test files; add tests to the existing files in `tests/` (e.g. `test_unit.py`, `test_integration.py`, `test_e2e.py`, `test_property.py`)
 
 ## Version Control
