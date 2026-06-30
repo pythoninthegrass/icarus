@@ -10,6 +10,15 @@ project:
   deploy_order:
     - [kestra]
 
+# Uncomment and populate the github block when the compose stack builds images
+# from source (compose file contains build: directives). Set sourceType: github
+# on the app as well. This causes Dokploy to clone the repo server-side so the
+# build has access to the Dockerfile and all source files.
+# github:
+#   owner: my-org
+#   repository: my-app
+#   branch: main
+
 environments:
   prod:
     apps:
@@ -24,6 +33,7 @@ environments:
 apps:
   - name: kestra
     source: compose
+    # sourceType: github  # uncomment to clone repo server-side (required for build: directives)
     composeFile: docker-compose.yml
     composeType: docker-compose
     # env: |

@@ -32,6 +32,7 @@ from icarus.payloads import (
     build_backup_create_payload,
     build_build_type_payload,
     build_certificate_create_payload,
+    build_compose_update_payload,
     build_database_create_payload,
     build_destination_create_payload,
     build_destination_update_payload,

@@ -122,6 +122,38 @@ def resolve_compose_file(app_def: dict, repo_root: Path) -> str:
     return path.read_text()
 
 
+def build_compose_update_payload(
+    compose_id: str,
+    app_def: dict,
+    github_cfg: dict | None,
+    github_id: str | None,
+    repo_root: Path | None,
+) -> dict:
+    """Build the source payload for compose.update.
+
+    For sourceType: github, sends repo coordinates and composePath so Dokploy
+    clones the repository server-side. For raw (default), sends the compose file
+    content inline.
+    """
+    if app_def.get("sourceType") == "github":
+        assert github_cfg is not None, "github_cfg required for sourceType: github"
+        assert github_id is not None, "github_id required for sourceType: github"
+        return {
+            "composeId": compose_id,
+            "sourceType": "github",
+            "repository": github_cfg["repository"],
+            "owner": github_cfg["owner"],
+            "branch": github_cfg["branch"],
+            "githubId": github_id,
+            "composePath": app_def["composeFile"],
+        }
+    return {
+        "composeId": compose_id,
+        "sourceType": "raw",
+        "composeFile": resolve_compose_file(app_def, repo_root),
+    }
+
+
 def build_domain_payload(resource_id: str, dom: dict, *, compose: bool = False) -> dict:
     """Build payload for domain.create."""
     if compose:

@@ -21,6 +21,7 @@ from icarus.payloads import (
     build_backup_create_payload,
     build_build_type_payload,
     build_certificate_create_payload,
+    build_compose_update_payload,
     build_database_create_payload,
     build_destination_create_payload,
     build_destination_update_payload,
@@ -216,7 +217,7 @@ def cmd_setup(client: DokployClient, cfg: dict, state_file: Path, repo_root: Pat
     print(f"  Project created: {project_id}")
     print(f"  Environment ID: {environment_id}")
 
-    # 2. Get githubId (only if there are GitHub-sourced apps)
+    # 2. Get githubId (only if there are GitHub-sourced apps or github-sourced compose apps)
     github_id = None
     if github_cfg:
         print("Fetching GitHub provider ID...")
@@ -341,11 +342,12 @@ def cmd_setup(client: DokployClient, cfg: dict, state_file: Path, repo_root: Pat
 
         if is_compose(app_def):
             compose_id = state["apps"][name]["composeId"]
-            compose_content = resolve_compose_file(app_def, repo_root or state_file.parent.parent)
-            print(f"Pushing compose file for {name}...")
+            effective_root = repo_root or state_file.parent.parent
+            source_type = app_def.get("sourceType", "raw")
+            print(f"Pushing compose source ({source_type}) for {name}...")
             client.post(
                 "compose.update",
-                {"composeId": compose_id, "composeFile": compose_content, "sourceType": "raw"},
+                build_compose_update_payload(compose_id, app_def, github_cfg, github_id, effective_root),
             )
             continue
 
@@ -593,17 +595,23 @@ def cmd_env(
 
             if app_info.get("source") == "compose":
                 compose_id = app_info["composeId"]
-                compose_content = resolve_compose_file(app_def, repo_root)
-                print(f"Pushing env + compose file to {name}...")
-                client.post(
-                    "compose.update",
-                    {
-                        "composeId": compose_id,
-                        "env": resolved,
-                        "composeFile": compose_content,
-                        "sourceType": "raw",
-                    },
-                )
+                print(f"Pushing env to compose {name}...")
+                if app_def.get("sourceType") == "github":
+                    client.post(
+                        "compose.update",
+                        {"composeId": compose_id, "env": resolved},
+                    )
+                else:
+                    compose_content = resolve_compose_file(app_def, repo_root)
+                    client.post(
+                        "compose.update",
+                        {
+                            "composeId": compose_id,
+                            "env": resolved,
+                            "composeFile": compose_content,
+                            "sourceType": "raw",
+                        },
+                    )
             else:
                 app_id = app_info["applicationId"]
                 create_env_file = apps_by_name[name].get("create_env_file", False)

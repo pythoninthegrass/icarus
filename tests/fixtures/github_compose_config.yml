@@ -1,0 +1,20 @@
+# Config for a GitHub-sourced compose app (sourceType: github).
+# The compose file lives in the repo; Dokploy clones it server-side.
+
+project:
+  name: my-compose-app
+  description: "Multi-service compose app built from source"
+  deploy_order:
+    - - app
+
+github:
+  owner: pythoninthegrass
+  repository: my-app
+  branch: main
+
+apps:
+  - name: app
+    source: compose
+    sourceType: github
+    composeFile: docker-compose.yml
+    composeType: docker-compose

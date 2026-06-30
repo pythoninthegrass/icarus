@@ -1264,3 +1264,60 @@ class TestResolveGithubProvider:
         result = dokploy.resolve_github_provider(client, providers, "my-org")
         assert result == "gh-1"
         assert call_count["n"] == 1
+
+
+# ---------------------------------------------------------------------------
+# cmd_setup — compose with sourceType: github (over mocked HTTP transport)
+# ---------------------------------------------------------------------------
+
+
+class TestCmdSetupComposeGithubIntegration:
+    def _make_router(self):
+        router = respx.Router()
+        router.post(f"{BASE_URL}/api/project.create").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "project": {"projectId": "proj-1"},
+                    "environment": {"environmentId": "env-1"},
+                },
+            )
+        )
+        router.post(f"{BASE_URL}/api/compose.create").mock(
+            return_value=httpx.Response(
+                200,
+                json={"composeId": "comp-gh-1", "appName": "app-gen"},
+            )
+        )
+        router.post(f"{BASE_URL}/api/compose.update").mock(
+            return_value=httpx.Response(200, content=b"")
+        )
+        router.get(f"{BASE_URL}/api/github.githubProviders").mock(
+            return_value=httpx.Response(200, json=[{"githubId": "gh-123"}])
+        )
+        router.get(f"{BASE_URL}/api/github.getGithubRepositories").mock(
+            return_value=httpx.Response(
+                200,
+                json=[{"owner": {"login": "pythoninthegrass"}, "name": "my-app"}],
+            )
+        )
+        return router
+
+    def test_compose_update_sends_github_payload(self, tmp_path, github_compose_config):
+        """compose.update over the wire carries sourceType: github and repo fields."""
+        state_file = tmp_path / ".dokploy-state" / "test.json"
+        router = self._make_router()
+        client = _make_client(router)
+
+        dokploy.cmd_setup(client, github_compose_config, state_file)
+
+        update_route = router.routes[2]
+        assert update_route.called
+        sent = json.loads(update_route.calls[0].request.content)
+        assert sent["sourceType"] == "github"
+        assert sent["repository"] == "my-app"
+        assert sent["owner"] == "pythoninthegrass"
+        assert sent["branch"] == "main"
+        assert sent["githubId"] == "gh-123"
+        assert sent["composePath"] == "docker-compose.yml"
+        assert "composeFile" not in sent

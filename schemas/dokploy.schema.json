@@ -213,6 +213,26 @@
                     "$ref": "#/$defs/redirect"
                   },
                   "description": "URL redirects (regex-based 301/302)"
+                },
+                "sourceType": {
+                  "type": "string",
+                  "enum": [
+                    "raw",
+                    "github"
+                  ],
+                  "description": "Compose source type override"
+                },
+                "composeFile": {
+                  "type": "string",
+                  "description": "Compose file path override"
+                },
+                "composeType": {
+                  "type": "string",
+                  "enum": [
+                    "docker-compose",
+                    "stack"
+                  ],
+                  "description": "Compose deployment type override"
                 }
               }
             }
@@ -239,9 +259,32 @@
             "type": "string",
             "enum": [
               "docker",
-              "github"
+              "github",
+              "compose"
             ],
             "description": "App source type"
+          },
+          "sourceType": {
+            "type": "string",
+            "enum": [
+              "raw",
+              "github"
+            ],
+            "default": "raw",
+            "description": "Compose source type — raw (inline file) or github (server-side clone). Only valid when source is compose."
+          },
+          "composeFile": {
+            "type": "string",
+            "description": "Compose file path relative to the repo root (for github sourceType) or inline YAML block scalar / relative path (for raw sourceType). Required when source is compose."
+          },
+          "composeType": {
+            "type": "string",
+            "enum": [
+              "docker-compose",
+              "stack"
+            ],
+            "default": "docker-compose",
+            "description": "Compose deployment type. Only valid when source is compose."
           },
           "dockerImage": {
             "type": "string",

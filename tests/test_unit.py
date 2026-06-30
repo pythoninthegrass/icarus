@@ -6113,3 +6113,178 @@ class TestSyncServiceEnvs:
         dokploy.sync_service_envs(state, {})
 
         ssh_class.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# build_compose_update_payload
+# ---------------------------------------------------------------------------
+
+
+class TestBuildComposeUpdatePayload:
+    def test_raw_returns_inline_content(self, tmp_path):
+        """sourceType absent (default raw) reads compose file content from disk."""
+        compose_file = tmp_path / "docker-compose.yml"
+        compose_file.write_text("version: '3'\nservices:\n  web:\n    image: nginx\n")
+        app_def = {"name": "app", "source": "compose", "composeFile": "docker-compose.yml"}
+        result = dokploy.build_compose_update_payload("comp-1", app_def, None, None, tmp_path)
+        assert result["composeId"] == "comp-1"
+        assert result["sourceType"] == "raw"
+        assert "composeFile" in result
+        assert "nginx" in result["composeFile"]
+        assert "repository" not in result
+        assert "githubId" not in result
+
+    def test_github_returns_repo_coordinates(self):
+        """sourceType: github sends repo fields and composePath, no disk read."""
+        app_def = {
+            "name": "app",
+            "source": "compose",
+            "sourceType": "github",
+            "composeFile": "docker-compose.yml",
+        }
+        github_cfg = {"owner": "org", "repository": "my-app", "branch": "main"}
+        result = dokploy.build_compose_update_payload("comp-1", app_def, github_cfg, "gh-123", None)
+        assert result == {
+            "composeId": "comp-1",
+            "sourceType": "github",
+            "repository": "my-app",
+            "owner": "org",
+            "branch": "main",
+            "githubId": "gh-123",
+            "composePath": "docker-compose.yml",
+        }
+        assert "composeFile" not in result
+
+    def test_github_does_not_read_disk(self, tmp_path):
+        """sourceType: github never touches the filesystem for the compose file."""
+        app_def = {
+            "name": "app",
+            "source": "compose",
+            "sourceType": "github",
+            "composeFile": "nonexistent.yml",
+        }
+        github_cfg = {"owner": "org", "repository": "repo", "branch": "main"}
+        # If resolve_compose_file were called it would sys.exit because the file is missing.
+        result = dokploy.build_compose_update_payload("comp-1", app_def, github_cfg, "gh-99", tmp_path)
+        assert result["sourceType"] == "github"
+        assert result["composePath"] == "nonexistent.yml"
+
+
+# ---------------------------------------------------------------------------
+# validate_config — compose + sourceType: github
+# ---------------------------------------------------------------------------
+
+
+class TestValidateConfigComposeGithub:
+    def test_compose_github_without_github_block_exits(self, minimal_config):
+        """A compose app with sourceType: github requires a top-level github: block."""
+        minimal_config["apps"].append(
+            {
+                "name": "svc",
+                "source": "compose",
+                "sourceType": "github",
+                "composeFile": "docker-compose.yml",
+            }
+        )
+        minimal_config["project"]["deploy_order"] = [["app", "svc"]]
+        with pytest.raises(SystemExit):
+            dokploy.validate_config(minimal_config)
+
+    def test_compose_github_with_github_block_passes(self, minimal_config):
+        """A compose app with sourceType: github passes when github: block present."""
+        minimal_config["apps"].append(
+            {
+                "name": "svc",
+                "source": "compose",
+                "sourceType": "github",
+                "composeFile": "docker-compose.yml",
+            }
+        )
+        minimal_config["project"]["deploy_order"] = [["app", "svc"]]
+        minimal_config["github"] = {"owner": "org", "repository": "repo", "branch": "main"}
+        dokploy.validate_config(minimal_config)
+
+    def test_compose_raw_without_github_block_passes(self, minimal_config):
+        """A raw compose app does not require a github: block."""
+        minimal_config["apps"].append(
+            {
+                "name": "svc",
+                "source": "compose",
+                "composeFile": "docker-compose.yml",
+            }
+        )
+        minimal_config["project"]["deploy_order"] = [["app", "svc"]]
+        dokploy.validate_config(minimal_config)
+
+
+# ---------------------------------------------------------------------------
+# cmd_setup — compose with sourceType: github
+# ---------------------------------------------------------------------------
+
+
+class TestCmdSetupComposeGithub:
+    def _make_mock_client(self):
+        client = MagicMock()
+
+        def fake_post(endpoint, payload=None):
+            if endpoint == "project.create":
+                return {
+                    "project": {"projectId": "proj-1"},
+                    "environment": {"environmentId": "env-1"},
+                }
+            if endpoint == "compose.create":
+                return {"composeId": "comp-gh-1", "appName": "app-gen"}
+            if endpoint == "compose.update":
+                return {}
+            return {}
+
+        def fake_get(endpoint, params=None):
+            if endpoint == "github.githubProviders":
+                return [{"githubId": "gh-123"}]
+            if endpoint == "github.getGithubRepositories":
+                return [{"owner": {"login": "pythoninthegrass"}, "name": "my-app"}]
+            return []
+
+        client.post = MagicMock(side_effect=fake_post)
+        client.get = MagicMock(side_effect=fake_get)
+        return client
+
+    def test_compose_update_payload_uses_github_source(self, tmp_path, github_compose_config):
+        """cmd_setup sends sourceType: github + repo coordinates for compose apps with sourceType: github."""
+        state_file = tmp_path / ".dokploy-state" / "test.json"
+        client = self._make_mock_client()
+
+        dokploy.cmd_setup(client, github_compose_config, state_file)
+
+        update_calls = [c for c in client.post.call_args_list if c[0][0] == "compose.update"]
+        assert len(update_calls) == 1
+        payload = update_calls[0][0][1]
+        assert payload["sourceType"] == "github"
+        assert payload["repository"] == "my-app"
+        assert payload["owner"] == "pythoninthegrass"
+        assert payload["branch"] == "main"
+        assert payload["githubId"] == "gh-123"
+        assert payload["composePath"] == "docker-compose.yml"
+        assert "composeFile" not in payload
+
+    def test_compose_create_called_before_update(self, tmp_path, github_compose_config):
+        """compose.create is called before compose.update during setup."""
+        state_file = tmp_path / ".dokploy-state" / "test.json"
+        client = self._make_mock_client()
+
+        dokploy.cmd_setup(client, github_compose_config, state_file)
+
+        endpoints = [c[0][0] for c in client.post.call_args_list]
+        create_idx = next(i for i, e in enumerate(endpoints) if e == "compose.create")
+        update_idx = next(i for i, e in enumerate(endpoints) if e == "compose.update")
+        assert create_idx < update_idx
+
+    def test_github_provider_lookup_performed(self, tmp_path, github_compose_config):
+        """cmd_setup fetches githubProviders when a github: block is present."""
+        state_file = tmp_path / ".dokploy-state" / "test.json"
+        client = self._make_mock_client()
+
+        dokploy.cmd_setup(client, github_compose_config, state_file)
+
+        get_calls = [c[0][0] for c in client.get.call_args_list]
+        assert "github.githubProviders" in get_calls

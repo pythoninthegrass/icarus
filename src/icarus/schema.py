@@ -34,7 +34,7 @@ def validate_config(cfg: dict) -> None:
                 print(f"ERROR: deploy_order references unknown app '{name}'")
                 sys.exit(1)
 
-    github_apps = [a for a in cfg["apps"] if a.get("source") == "github"]
+    github_apps = [a for a in cfg["apps"] if a.get("source") == "github" or a.get("sourceType") == "github"]
     if github_apps and "github" not in cfg:
         print("ERROR: GitHub-sourced apps exist but no [github] config found")
         sys.exit(1)

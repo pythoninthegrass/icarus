@@ -79,8 +79,9 @@ All per-app fields can be overridden per environment: `command`, `env`, `dockerI
 | `apps[].volumes` | no | List of volume mount objects for persistent storage |
 | `apps[].ports` | no | List of port mapping objects for TCP/UDP port exposure |
 | `apps[].schedules` | no | List of cron job objects that run commands inside the app container |
-| `apps[].composeFile` | if compose | Compose file — inline YAML block scalar (`\|`) or relative file path (e.g. `docker-compose.yml`) resolved from `dokploy.yml` location |
+| `apps[].composeFile` | if compose | Compose file — inline YAML block scalar (`\|`) or relative file path (for `sourceType: raw`), or in-repo path sent as `composePath` to Dokploy (for `sourceType: github`) |
 | `apps[].composeType` | no | Compose type: `docker-compose` (default) or `stack` |
+| `apps[].sourceType` | no | Compose source type: `raw` (default — inline/local file) or `github` (server-side repo clone) |
 
 ### Volume Mount Object
 
@@ -160,7 +161,11 @@ domain:
 
 ## Compose Apps
 
-Apps with `source: compose` deploy a full Docker Compose stack as a single Dokploy resource. The compose file can be provided inline or as a relative file path:
+Apps with `source: compose` deploy a full Docker Compose stack as a single Dokploy resource.
+
+### Raw source (default)
+
+The compose file is stored inline in `dokploy.yml` or read from a local path at deploy time. Dokploy receives the full file content — suitable for stacks that only pull pre-built images.
 
 ```yaml
 apps:
@@ -175,12 +180,36 @@ apps:
             - "80"
     composeType: docker-compose
 
-  # External compose file
+  # External compose file (relative to dokploy.yml)
   - name: my-stack
     source: compose
     composeFile: docker-compose.yml
     composeType: docker-compose
 ```
+
+### GitHub source
+
+Set `sourceType: github` when the compose stack builds images from source (i.e. the compose file references `build:` directives). Dokploy clones the repository server-side, giving the build a real context with the Dockerfile and all source files present.
+
+Requires a top-level `github:` block (same as for `source: github` applications). `composeFile` is the path to the compose file within the repository.
+
+```yaml
+github:
+  owner: my-org
+  repository: my-app
+  branch: main
+
+apps:
+  - name: my-stack
+    source: compose
+    sourceType: github
+    composeFile: docker-compose.yml
+    composeType: docker-compose
+```
+
+This resolves the `failed to solve: open Dockerfile: no such file or directory` error that occurs when using `build:` directives with the default raw source.
+
+### Env vars and domains
 
 Compose env vars (defined in per-app `env:` or pushed from the project `.env` via `env_targets`) are available in the compose file using standard `${VAR}` syntax. Dokploy resolves these at deploy time. Use `$${VAR}` to escape literal `$` in shell contexts (e.g. healthcheck commands).
 

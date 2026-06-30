@@ -110,6 +110,12 @@ def certificate_config():
 
 
 @pytest.fixture
+def github_compose_config():
+    """GitHub-sourced compose app config (sourceType: github)."""
+    return _load_fixture("github_compose_config.yml")
+
+
+@pytest.fixture
 def dokploy_yml(tmp_path, minimal_config):
     """Write a minimal dokploy.yml in tmp_path and return the path."""
     config_file = tmp_path / "dokploy.yml"
