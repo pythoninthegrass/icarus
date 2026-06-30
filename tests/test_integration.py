@@ -29,10 +29,6 @@ def _make_client(router: respx.Router) -> dokploy.DokployClient:
     return client
 
 
-# ---------------------------------------------------------------------------
-# DokployClient tests
-# ---------------------------------------------------------------------------
-
 
 class TestDokployClientInit:
     def test_base_url_trailing_slash_stripped(self):
@@ -122,10 +118,6 @@ class TestDokployClientPost:
         with pytest.raises(httpx.HTTPStatusError):
             client.post("project.create", {"name": ""})
 
-
-# ---------------------------------------------------------------------------
-# cmd_check tests
-# ---------------------------------------------------------------------------
 
 
 class TestCmdCheck:
@@ -223,10 +215,6 @@ class TestCmdCheck:
         assert "FAIL" in output
         assert "dokploy.yml" in output
 
-
-# ---------------------------------------------------------------------------
-# cmd_setup tests
-# ---------------------------------------------------------------------------
 
 
 def _setup_router(
@@ -497,10 +485,6 @@ class TestCmdSetup:
             dokploy.cmd_setup(client, web_app_config, state_file)
 
 
-# ---------------------------------------------------------------------------
-# cmd_env tests
-# ---------------------------------------------------------------------------
-
 
 class TestCmdEnv:
     def _write_state(self, state_file: Path, state: dict) -> None:
@@ -639,10 +623,6 @@ class TestCmdEnv:
         assert "COMPOSE_FILE" not in payload["env"]
         assert "APP_KEY=secret" in payload["env"]
 
-
-# ---------------------------------------------------------------------------
-# cmd_trigger tests
-# ---------------------------------------------------------------------------
 
 
 class TestCmdTrigger:
@@ -803,10 +783,6 @@ class TestCmdTrigger:
         assert len(sync_calls) == 0
 
 
-# ---------------------------------------------------------------------------
-# cmd_status tests
-# ---------------------------------------------------------------------------
-
 
 class TestCmdStatus:
     def _write_state(self, state_file: Path, state: dict) -> None:
@@ -847,10 +823,6 @@ class TestCmdStatus:
         assert "idle" in output
         assert "proj-1" in output
 
-
-# ---------------------------------------------------------------------------
-# cmd_destroy tests
-# ---------------------------------------------------------------------------
 
 
 class TestCmdDestroy:
@@ -899,10 +871,6 @@ class TestCmdDestroy:
 
         assert remove_route.called
 
-
-# ---------------------------------------------------------------------------
-# Full pipeline test
-# ---------------------------------------------------------------------------
 
 
 class TestFullPipeline:
@@ -1199,10 +1167,6 @@ class TestCmdImport:
             dokploy.cmd_import(client, minimal_config, state_file)
 
 
-# ---------------------------------------------------------------------------
-# resolve_github_provider tests
-# ---------------------------------------------------------------------------
-
 
 class TestResolveGithubProvider:
     def test_selects_matching_provider(self):
@@ -1265,10 +1229,6 @@ class TestResolveGithubProvider:
         assert result == "gh-1"
         assert call_count["n"] == 1
 
-
-# ---------------------------------------------------------------------------
-# cmd_setup — compose with sourceType: github (over mocked HTTP transport)
-# ---------------------------------------------------------------------------
 
 
 class TestCmdSetupComposeGithubIntegration:
