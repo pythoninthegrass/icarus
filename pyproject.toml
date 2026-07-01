@@ -31,13 +31,6 @@ test = [
     "respx>=0.22.0",
 ]
 
-[project.scripts]
-ic = "icarus:main"
-
-[build-system]
-requires = ["uv_build>=0.10.2,<0.11.0"]
-build-backend = "uv_build"
-
 [tool.pytest.ini_options]
 addopts = "-m 'not e2e'"
 testpaths = ["tests"]
@@ -52,3 +45,10 @@ markers = [
     "benchmark: marks performance benchmark tests",
     "property: marks property-based tests (Hypothesis)"
 ]
+
+[project.scripts]
+ic = "icarus:main"
+
+[build-system]
+requires = ["uv_build>=0.10.2,<0.11.0"]
+build-backend = "uv_build"
