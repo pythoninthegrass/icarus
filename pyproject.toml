@@ -16,7 +16,7 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "pyclean>=3.5.0",
-    "ruff>=0.15.5",
+    "ruff>=0.15.20",
 ]
 
 test = [
