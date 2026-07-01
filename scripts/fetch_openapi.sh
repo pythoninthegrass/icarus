@@ -10,7 +10,14 @@ OUTDIR="schemas/src"
 OUTFILE="${OUTDIR}/openapi_${VERSION}.json"
 
 mkdir -p "$OUTDIR"
-gh api "repos/Dokploy/dokploy/contents/openapi.json?ref=${TAG}" \
-  --jq '.content' | base64 -d | jq . > "$OUTFILE"
+
+DOWNLOAD_URL=$(gh api "repos/Dokploy/dokploy/contents/openapi.json?ref=${TAG}" --jq '.download_url')
+curl -fsSL "$DOWNLOAD_URL" | jq . > "$OUTFILE"
+
+if [ ! -s "$OUTFILE" ]; then
+  echo "Error: $OUTFILE is empty — fetch failed for ${TAG}" >&2
+  rm -f "$OUTFILE"
+  exit 1
+fi
 
 echo "Saved: $OUTFILE ($(wc -c < "$OUTFILE") bytes)"

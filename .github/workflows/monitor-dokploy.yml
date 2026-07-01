@@ -38,7 +38,7 @@ jobs:
         id: check
         run: |
           FILE="schemas/src/openapi_${{ steps.release.outputs.version }}.json"
-          if [ -f "$FILE" ]; then
+          if [ -s "$FILE" ]; then
             echo "exists=true" >> "$GITHUB_OUTPUT"
             echo "Spec already exists: $FILE"
           else
