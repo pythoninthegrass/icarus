@@ -1,5 +1,60 @@
 # Changelog
 
+## [0.3.0](https://github.com/pythoninthegrass/icarus/compare/icarus-v0.2.0...icarus-v0.3.0) (2026-07-01)
+
+
+### Features
+
+* add `plan` subcommand with terraform-style diff view ([3aba161](https://github.com/pythoninthegrass/icarus/commit/3aba1616b199eda817d8baf5e07a2db8e5a70edd))
+* add API retry with exponential backoff to DokployClient ([87cf836](https://github.com/pythoninthegrass/icarus/commit/87cf83640a0ec5df737a5731227479e1465b3be3))
+* add app config drift detection to plan and reconcile on redeploy ([f89cec4](https://github.com/pythoninthegrass/icarus/commit/f89cec4749c64eee869ae2c09e979e0655b7ec66))
+* add backup destination and database backup management ([#15](https://github.com/pythoninthegrass/icarus/issues/15)) ([8145f87](https://github.com/pythoninthegrass/icarus/commit/8145f870006802420aa5b8b2da9caffd6b6e0e2b))
+* add basic auth security support for applications ([f90825c](https://github.com/pythoninthegrass/icarus/commit/f90825cef2ebab6df1067fb28a29cdfeab8835cd))
+* add basic auth security support for applications ([2a24aa4](https://github.com/pythoninthegrass/icarus/commit/2a24aa4a176fcb89ae2e033e030f9e14ccbc874b))
+* add compose deployment support, archive completed backlog tasks ([6054205](https://github.com/pythoninthegrass/icarus/commit/605420554b7e5f575b83a687f87c3d91693f2ac7))
+* add Conductor workspace automation for python/uv/mise ([c71e111](https://github.com/pythoninthegrass/icarus/commit/c71e1112879e1cbcb6577a222f6077990c8973be))
+* add container registry management support ([fd1c5fe](https://github.com/pythoninthegrass/icarus/commit/fd1c5feccfab4457704adb7ec8335d8f3cb48bdd))
+* add custom certificate support ([2f880ea](https://github.com/pythoninthegrass/icarus/commit/2f880eac3b08a7d197f37c981215529d2f30bcc1))
+* add database resource management (postgres, mysql, mariadb, mongo, redis) ([616307d](https://github.com/pythoninthegrass/icarus/commit/616307d9d48296c7c5ff1c6ecd09a6f8e60c58b3))
+* add docker-compose example with env var substitution, backlog task ([06cfa99](https://github.com/pythoninthegrass/icarus/commit/06cfa99a75702f9987d1623448df92821d2bb969))
+* add port exposure support (TCP/UDP port mappings) ([7bbec40](https://github.com/pythoninthegrass/icarus/commit/7bbec4030cc30a5039db72a16193d4d57510faca))
+* add standalone `clean` command, reuse in `destroy` ([ce2ed00](https://github.com/pythoninthegrass/icarus/commit/ce2ed00c52a21ac627010ff3e88450dc5c4bdbef)), closes [#5](https://github.com/pythoninthegrass/icarus/issues/5)
+* add URL redirect support for applications ([#12](https://github.com/pythoninthegrass/icarus/issues/12)) ([cacec6d](https://github.com/pythoninthegrass/icarus/commit/cacec6ddd1a1d524064fe1d12f9a46d5fbb6035f))
+* **ci:** add workflow to monitor Dokploy upstream releases ([1bc8414](https://github.com/pythoninthegrass/icarus/commit/1bc8414aeaedd8fdec55fefa71be4f4ca0ce027d))
+* **compose:** support sourceType: github for compose apps ([6d1f37c](https://github.com/pythoninthegrass/icarus/commit/6d1f37cd807bdf5e3548b7df9b60efed7f54a0aa)), closes [#18](https://github.com/pythoninthegrass/icarus/issues/18)
+* **config:** add volume mount support to dokploy.yml ([3b6c6ef](https://github.com/pythoninthegrass/icarus/commit/3b6c6ef36c3690471d513a0a9b67c99c92bc4c62)), closes [#7](https://github.com/pythoninthegrass/icarus/issues/7)
+* **deploy:** use application.redeploy for existing projects and clean up stale routes ([d7c2131](https://github.com/pythoninthegrass/icarus/commit/d7c213196d003f3f5c74174ba9b66ccb0e9786a0))
+* reconcile domains on apply/redeploy ([c68c4cc](https://github.com/pythoninthegrass/icarus/commit/c68c4ccea2b2b0dacbcde958fdbd00a26515b8c4))
+* reconcile mounts/volumes on apply/redeploy ([248312a](https://github.com/pythoninthegrass/icarus/commit/248312a2b813584ddd36955a1e279c7349b1234f))
+* **schedule:** add cron job support for applications ([7e1f690](https://github.com/pythoninthegrass/icarus/commit/7e1f690d11340e4b3f8370048e97ed4afae5a5fa))
+* support DOTENV_FILE env var and --env-file flag for env push ([5e4036e](https://github.com/pythoninthegrass/icarus/commit/5e4036e846a204bd91f2f4d4473b873fed54cb1d)), closes [#8](https://github.com/pythoninthegrass/icarus/issues/8)
+
+
+### Bug Fixes
+
+* **config:** use serviceId instead of applicationId for mounts.create ([6464a02](https://github.com/pythoninthegrass/icarus/commit/6464a020ec0935c90b62e94c0e59aadcc1fe3fc2))
+* **env:** deduplicate keys when merging per-app env into shared env ([21bcfa6](https://github.com/pythoninthegrass/icarus/commit/21bcfa6f78a61eac83b9542165680b02097835a2))
+* **env:** merge per-app env into shared push for env_targets apps ([bfaf0de](https://github.com/pythoninthegrass/icarus/commit/bfaf0de4995336e355730d9459308b21c05bd432)), closes [#19](https://github.com/pythoninthegrass/icarus/issues/19)
+* **logs:** prefer running container over exited in select_container ([1246df6](https://github.com/pythoninthegrass/icarus/commit/1246df68e40ea88af99e5772da2db0f1656674f1))
+* **monitor:** fetch_openapi.sh uses download_url for specs &gt;1MB ([f0be724](https://github.com/pythoninthegrass/icarus/commit/f0be72412eaaad9cc07fd56258bf670ea7f16393)), closes [#21](https://github.com/pythoninthegrass/icarus/issues/21)
+* **mounts:** use serviceId instead of applicationId for mounts.create ([28e337d](https://github.com/pythoninthegrass/icarus/commit/28e337da52c5594279939327f58281fad46f1a8c))
+* remove legacy dokploy_seed reference ([6ff8205](https://github.com/pythoninthegrass/icarus/commit/6ff8205cdb178930f3c12f00c0552ae5a1235e29))
+* **setup:** save state early to prevent orphaned resources on failure ([8ff4c00](https://github.com/pythoninthegrass/icarus/commit/8ff4c0057b85f465cb15235558c16e4728883ef9))
+* **trigger:** sync env into live Docker service spec on redeploy ([c435478](https://github.com/pythoninthegrass/icarus/commit/c43547848f547053c2d1ef1328ef71f4c4a41a9f)), closes [#20](https://github.com/pythoninthegrass/icarus/issues/20)
+
+
+### Documentation
+
+* add schedule API notes, redeploy endpoint, missing fixtures and isStaticSpa ([1039382](https://github.com/pythoninthegrass/icarus/commit/1039382947171e8a2e0575e1b170b6f5da8dafaf))
+* **agents:** add Version Control section for issue-closing commit trailers ([98bf4aa](https://github.com/pythoninthegrass/icarus/commit/98bf4aa5c548a1dc04804486fef39bc5fc420801))
+* **agents:** expand section comment prohibition to include horizontal rule style ([10e1364](https://github.com/pythoninthegrass/icarus/commit/10e1364310efcb4e75bb968d06a05bd3e90f6b2e))
+* Merge pull request [#14](https://github.com/pythoninthegrass/icarus/issues/14) from pythoninthegrass/pythoninthegrass/basic-auth-security ([29ae047](https://github.com/pythoninthegrass/icarus/commit/29ae047e0675830e83b8570133d6b9278cdc3307))
+* **readme:** update commands table and project structure ([eb52646](https://github.com/pythoninthegrass/icarus/commit/eb52646495d7e55480f0461a2ae2adc87a75e00d))
+* update backlog tasks ([332b0c1](https://github.com/pythoninthegrass/icarus/commit/332b0c1fd4674b97f7949889fffb83d1e2e69874))
+* update backlog tasks ([3dba86b](https://github.com/pythoninthegrass/icarus/commit/3dba86ba8e163c4212ff7b454c627273f6070015))
+* update backlog tasks ([b5fe000](https://github.com/pythoninthegrass/icarus/commit/b5fe000d8138a394c9f5b1cd703b36fda75c28bf))
+* update llm instrx ([c475d12](https://github.com/pythoninthegrass/icarus/commit/c475d1200f9500b29e21ff09b4296854b1596231))
+
 ## [0.2.0](https://github.com/pythoninthegrass/icarus/compare/icarus-v0.1.0...icarus-v0.2.0) (2026-03-13)
 
 
