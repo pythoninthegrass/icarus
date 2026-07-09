@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.3.1](https://github.com/pythoninthegrass/icarus/compare/icarus-v0.3.0...icarus-v0.3.1) (2026-07-09)
+
+
+### Bug Fixes
+
+* require a done deployment, not just any history, before redeploying ([91aadc9](https://github.com/pythoninthegrass/icarus/commit/91aadc96d7694d47662b37fab71204a09aef0898))
+* use application.deploy for apps never actually deployed ([b9a3f43](https://github.com/pythoninthegrass/icarus/commit/b9a3f43d7eb915e1ef1ce391f40e10959ce77f47))
+
 ## [0.3.0](https://github.com/pythoninthegrass/icarus/compare/icarus-v0.2.0...icarus-v0.3.0) (2026-07-01)
 
 
