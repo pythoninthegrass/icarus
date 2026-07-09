@@ -668,12 +668,14 @@ def cmd_env(
 
 
 def _has_prior_deployment(client: DokployClient, app_info: dict) -> bool:
-    """Check whether Dokploy has ever actually deployed this app.
+    """Check whether Dokploy has ever successfully deployed this app.
 
     ``application.redeploy``/``compose.redeploy`` assume the repo is already
     cloned into ``code/`` and skip straight to build; a brand-new app (e.g.
     recreated via ``destroy``+``setup``) has no ``code/`` dir yet and must go
-    through ``application.deploy``/``compose.deploy`` at least once.
+    through ``application.deploy``/``compose.deploy`` at least once. A history
+    of only failed deployments is not evidence the clone ever happened, so
+    this requires at least one deployment with status "done".
     """
     if app_info.get("source") == "compose":
         params = {"composeId": app_info["composeId"]}
@@ -683,7 +685,7 @@ def _has_prior_deployment(client: DokployClient, app_info: dict) -> bool:
         history = client.get("deployment.all", params)
     except Exception:
         return True  # fail safe: assume redeploy is fine if we can't tell
-    return bool(history)
+    return any(entry.get("status") == "done" for entry in history or [])
 
 
 def cmd_trigger(
