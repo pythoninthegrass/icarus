@@ -667,6 +667,25 @@ def cmd_env(
     print("\nEnvironment variables pushed.")
 
 
+def _has_prior_deployment(client: DokployClient, app_info: dict) -> bool:
+    """Check whether Dokploy has ever actually deployed this app.
+
+    ``application.redeploy``/``compose.redeploy`` assume the repo is already
+    cloned into ``code/`` and skip straight to build; a brand-new app (e.g.
+    recreated via ``destroy``+``setup``) has no ``code/`` dir yet and must go
+    through ``application.deploy``/``compose.deploy`` at least once.
+    """
+    if app_info.get("source") == "compose":
+        params = {"composeId": app_info["composeId"]}
+    else:
+        params = {"applicationId": app_info["applicationId"]}
+    try:
+        history = client.get("deployment.all", params)
+    except Exception:
+        return True  # fail safe: assume redeploy is fine if we can't tell
+    return bool(history)
+
+
 def cmd_trigger(
     client: DokployClient,
     cfg: dict,
@@ -686,18 +705,19 @@ def cmd_trigger(
             sync_service_envs(state, app_envs)
 
     deploy_order = cfg["project"].get("deploy_order", [])
-    endpoint = "application.redeploy" if redeploy else "application.deploy"
-    action = "Redeploying" if redeploy else "Deploying"
 
     for i, wave in enumerate(deploy_order, 1):
         print(f"Wave {i}: {', '.join(wave)}")
         for name in wave:
             app_info = state["apps"][name]
+            app_redeploy = redeploy and _has_prior_deployment(client, app_info)
+            action = "Redeploying" if app_redeploy else "Deploying"
             print(f"  {action} {name}...")
             if app_info.get("source") == "compose":
-                compose_endpoint = "compose.redeploy" if redeploy else "compose.deploy"
+                compose_endpoint = "compose.redeploy" if app_redeploy else "compose.deploy"
                 client.post(compose_endpoint, {"composeId": app_info["composeId"]})
             else:
+                endpoint = "application.redeploy" if app_redeploy else "application.deploy"
                 client.post(endpoint, {"applicationId": app_info["applicationId"]})
             print(f"    {name} deploy triggered.")
 

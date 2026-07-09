@@ -722,6 +722,52 @@ class TestCmdTrigger:
         assert len(deploy_route.calls) == 1
         assert len(redeploy_route.calls) == 0
 
+    def test_redeploy_falls_back_to_deploy_when_never_deployed(self, tmp_path, minimal_config):
+        """redeploy=True still uses application.deploy for an app with no deployment history."""
+        state = {
+            "projectId": "proj-1",
+            "environmentId": "env-1",
+            "apps": {"app": {"applicationId": "app-1", "appName": "app-gen"}},
+        }
+        state_file = tmp_path / ".dokploy-state" / "test.json"
+        self._write_state(state_file, state)
+
+        router = respx.Router()
+        router.get(f"{BASE_URL}/api/deployment.all", params={"applicationId": "app-1"}).mock(
+            return_value=httpx.Response(200, json=[])
+        )
+        deploy_route = router.post(f"{BASE_URL}/api/application.deploy").mock(return_value=httpx.Response(200, content=b""))
+        redeploy_route = router.post(f"{BASE_URL}/api/application.redeploy").mock(return_value=httpx.Response(200, content=b""))
+        client = _make_client(router)
+
+        dokploy.cmd_trigger(client, minimal_config, state_file, redeploy=True)
+
+        assert len(deploy_route.calls) == 1
+        assert len(redeploy_route.calls) == 0
+
+    def test_redeploy_uses_redeploy_when_previously_deployed(self, tmp_path, minimal_config):
+        """redeploy=True uses application.redeploy for an app with prior deployment history."""
+        state = {
+            "projectId": "proj-1",
+            "environmentId": "env-1",
+            "apps": {"app": {"applicationId": "app-1", "appName": "app-gen"}},
+        }
+        state_file = tmp_path / ".dokploy-state" / "test.json"
+        self._write_state(state_file, state)
+
+        router = respx.Router()
+        router.get(f"{BASE_URL}/api/deployment.all", params={"applicationId": "app-1"}).mock(
+            return_value=httpx.Response(200, json=[{"deploymentId": "d-1", "status": "done"}])
+        )
+        deploy_route = router.post(f"{BASE_URL}/api/application.deploy").mock(return_value=httpx.Response(200, content=b""))
+        redeploy_route = router.post(f"{BASE_URL}/api/application.redeploy").mock(return_value=httpx.Response(200, content=b""))
+        client = _make_client(router)
+
+        dokploy.cmd_trigger(client, minimal_config, state_file, redeploy=True)
+
+        assert len(redeploy_route.calls) == 1
+        assert len(deploy_route.calls) == 0
+
     def test_redeploy_calls_sync_service_envs(self, tmp_path, minimal_config, monkeypatch):
         """cmd_trigger with redeploy=True calls sync_service_envs before deploying."""
         from icarus import commands as icarus_commands
