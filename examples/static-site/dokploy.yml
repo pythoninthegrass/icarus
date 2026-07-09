@@ -1,0 +1,39 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/pythoninthegrass/icarus/main/schemas/dokploy.schema.json
+
+# Static site behind a reverse proxy (Dockerfile build, no framework/build step)
+# Dockerfile copies static assets into a lightweight web server image
+# (e.g. caddy:2-alpine) which serves them on port 80 behind Dokploy's proxy.
+
+project:
+  name: my-static-site
+  description: |
+    Static HTML/CSS/JS site served via Dockerfile build.
+  deploy_order:
+    - [web]
+  env_targets:
+    - web
+
+github:
+  owner: your-org
+  repository: your-static-site
+  branch: main
+
+environments:
+  prod:
+    apps:
+      web:
+        domain:
+          host: site.example.com
+          port: 80
+          https: true
+          certificateType: letsencrypt
+        autoDeploy: true
+
+apps:
+  - name: web
+    source: github
+    buildType: dockerfile
+    dockerfile: Dockerfile
+    buildPath: /
+    triggerType: push
+    create_env_file: false
