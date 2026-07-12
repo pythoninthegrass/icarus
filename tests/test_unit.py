@@ -2454,6 +2454,99 @@ class TestDomainReconciliation:
         assert create_calls[0][0][1]["serviceName"] == "web"
         assert result["compose.example.com"]["domainId"] == "d1"
 
+    def test_same_host_different_path_creates_both(self):
+        """reconcile_domains treats same host + different path as distinct domains."""
+        existing = []
+        desired = [
+            {
+                "host": "s3.example.com",
+                "port": 9000,
+                "path": "/",
+                "https": True,
+                "certificateType": "letsencrypt",
+                "serviceName": "rustfs",
+            },
+            {
+                "host": "s3.example.com",
+                "port": 9001,
+                "path": "/rustfs/console",
+                "https": True,
+                "certificateType": "letsencrypt",
+                "serviceName": "rustfs",
+            },
+        ]
+        client = MagicMock()
+        call_count = {"n": 0}
+
+        def post_side_effect(endpoint, payload):
+            if endpoint == "domain.create":
+                call_count["n"] += 1
+                return {"domainId": f"d{call_count['n']}"}
+            return {}
+
+        client.post.side_effect = post_side_effect
+
+        result = dokploy.reconcile_domains(client, "comp-1", existing, desired, compose=True)
+
+        create_calls = [c for c in client.post.call_args_list if c[0][0] == "domain.create"]
+        assert len(create_calls) == 2
+        assert "s3.example.com" in result
+        assert "s3.example.com/rustfs/console" in result
+
+    def test_same_host_different_path_updates_only_changed(self):
+        """reconcile_domains updates only the path whose port changed, leaves other intact."""
+        existing = [
+            {
+                "domainId": "d1",
+                "host": "s3.example.com",
+                "port": 9000,
+                "path": "/",
+                "https": True,
+                "certificateType": "letsencrypt",
+                "serviceName": "rustfs",
+            },
+            {
+                "domainId": "d2",
+                "host": "s3.example.com",
+                "port": 9001,
+                "path": "/rustfs/console",
+                "https": True,
+                "certificateType": "letsencrypt",
+                "serviceName": "rustfs",
+            },
+        ]
+        desired = [
+            {
+                "host": "s3.example.com",
+                "port": 9000,
+                "path": "/",
+                "https": True,
+                "certificateType": "letsencrypt",
+                "serviceName": "rustfs",
+            },
+            {
+                "host": "s3.example.com",
+                "port": 9099,  # changed
+                "path": "/rustfs/console",
+                "https": True,
+                "certificateType": "letsencrypt",
+                "serviceName": "rustfs",
+            },
+        ]
+        client = MagicMock()
+        client.post.side_effect = lambda endpoint, payload: {}
+
+        dokploy.reconcile_domains(client, "comp-1", existing, desired, compose=True)
+
+        create_calls = [c for c in client.post.call_args_list if c[0][0] == "domain.create"]
+        delete_calls = [c for c in client.post.call_args_list if c[0][0] == "domain.delete"]
+        update_calls = [c for c in client.post.call_args_list if c[0][0] == "domain.update"]
+        assert len(create_calls) == 0
+        assert len(delete_calls) == 0
+        assert len(update_calls) == 1
+        assert update_calls[0][0][1]["domainId"] == "d2"
+        assert update_calls[0][0][1]["port"] == 9099
+
 
 class TestPlanDomainChanges:
     def test_plan_redeploy_shows_domain_changes(self, tmp_path):
@@ -2537,6 +2630,82 @@ class TestPlanDomainChanges:
         updated = [c for c in domain_changes if c["action"] == "update"]
         assert len(updated) == 1
         assert updated[0]["name"] == "kept.example.com"
+
+    def test_plan_same_host_different_path_creates_missing_only(self, tmp_path):
+        """_plan_redeploy treats same host + different path as distinct domains.
+
+        One entry already exists (API at /), the other is new (console at /rustfs/console).
+        Exactly one create is emitted and the existing entry is not destroyed.
+        """
+        state = {
+            "projectId": "proj-1",
+            "apps": {
+                "rustfs": {
+                    "composeId": "comp-1",
+                    "source": "compose",
+                },
+            },
+        }
+        cfg = {
+            "project": {"name": "test", "description": "test"},
+            "apps": [
+                {
+                    "name": "rustfs",
+                    "source": "compose",
+                    "composeFile": "docker-compose.yml",
+                    "composeType": "docker-compose",
+                    "domain": [
+                        {
+                            "host": "s3.example.com",
+                            "port": 9000,
+                            "path": "/",
+                            "https": True,
+                            "certificateType": "letsencrypt",
+                            "serviceName": "rustfs",
+                        },
+                        {
+                            "host": "s3.example.com",
+                            "port": 9001,
+                            "path": "/rustfs/console",
+                            "https": True,
+                            "certificateType": "letsencrypt",
+                            "serviceName": "rustfs",
+                        },
+                    ],
+                },
+            ],
+        }
+        remote_domains = [
+            {
+                "domainId": "d1",
+                "host": "s3.example.com",
+                "port": 9000,
+                "path": "/",
+                "https": True,
+                "certificateType": "letsencrypt",
+            },
+        ]
+
+        client = MagicMock()
+
+        def mock_get(endpoint, params=None):
+            if endpoint == "compose.one":
+                return {"env": "", "composeFile": ""}
+            if endpoint == "domain.byComposeId":
+                return remote_domains
+            return {}
+
+        client.get.side_effect = mock_get
+
+        changes = []
+        dokploy._plan_redeploy(client, cfg, state, tmp_path, changes)
+
+        domain_changes = [c for c in changes if c["resource_type"] == "domain"]
+        created = [c for c in domain_changes if c["action"] == "create"]
+        destroyed = [c for c in domain_changes if c["action"] == "destroy"]
+        assert len(created) == 1
+        assert "/rustfs/console" in created[0]["name"]
+        assert len(destroyed) == 0
 
 
 class TestMountReconciliation:

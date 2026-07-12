@@ -29,7 +29,6 @@ def _make_client(router: respx.Router) -> dokploy.DokployClient:
     return client
 
 
-
 class TestDokployClientInit:
     def test_base_url_trailing_slash_stripped(self):
         client = dokploy.DokployClient("https://example.com/", API_KEY)
@@ -117,7 +116,6 @@ class TestDokployClientPost:
         client = _make_client(router)
         with pytest.raises(httpx.HTTPStatusError):
             client.post("project.create", {"name": ""})
-
 
 
 class TestCmdCheck:
@@ -214,7 +212,6 @@ class TestCmdCheck:
         output = capsys.readouterr().out
         assert "FAIL" in output
         assert "dokploy.yml" in output
-
 
 
 def _setup_router(
@@ -485,7 +482,6 @@ class TestCmdSetup:
             dokploy.cmd_setup(client, web_app_config, state_file)
 
 
-
 class TestCmdEnv:
     def _write_state(self, state_file: Path, state: dict) -> None:
         state_file.parent.mkdir(parents=True, exist_ok=True)
@@ -622,7 +618,6 @@ class TestCmdEnv:
         assert "DOKPLOY_URL" not in payload["env"]
         assert "COMPOSE_FILE" not in payload["env"]
         assert "APP_KEY=secret" in payload["env"]
-
 
 
 class TestCmdTrigger:
@@ -857,7 +852,6 @@ class TestCmdTrigger:
         assert len(sync_calls) == 0
 
 
-
 class TestCmdStatus:
     def _write_state(self, state_file: Path, state: dict) -> None:
         state_file.parent.mkdir(parents=True, exist_ok=True)
@@ -896,7 +890,6 @@ class TestCmdStatus:
         assert "running" in output
         assert "idle" in output
         assert "proj-1" in output
-
 
 
 class TestCmdDestroy:
@@ -944,7 +937,6 @@ class TestCmdDestroy:
         dokploy.cmd_destroy(client, {"apps": []}, state_file)
 
         assert remove_route.called
-
 
 
 class TestFullPipeline:
@@ -1241,7 +1233,6 @@ class TestCmdImport:
             dokploy.cmd_import(client, minimal_config, state_file)
 
 
-
 class TestResolveGithubProvider:
     def test_selects_matching_provider(self):
         """Picks the provider whose repos include the configured owner."""
@@ -1304,7 +1295,6 @@ class TestResolveGithubProvider:
         assert call_count["n"] == 1
 
 
-
 class TestCmdSetupComposeGithubIntegration:
     def _make_router(self):
         router = respx.Router()
@@ -1323,12 +1313,8 @@ class TestCmdSetupComposeGithubIntegration:
                 json={"composeId": "comp-gh-1", "appName": "app-gen"},
             )
         )
-        router.post(f"{BASE_URL}/api/compose.update").mock(
-            return_value=httpx.Response(200, content=b"")
-        )
-        router.get(f"{BASE_URL}/api/github.githubProviders").mock(
-            return_value=httpx.Response(200, json=[{"githubId": "gh-123"}])
-        )
+        router.post(f"{BASE_URL}/api/compose.update").mock(return_value=httpx.Response(200, content=b""))
+        router.get(f"{BASE_URL}/api/github.githubProviders").mock(return_value=httpx.Response(200, json=[{"githubId": "gh-123"}]))
         router.get(f"{BASE_URL}/api/github.getGithubRepositories").mock(
             return_value=httpx.Response(
                 200,

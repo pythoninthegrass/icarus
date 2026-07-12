@@ -302,6 +302,22 @@ def reconcile_app_mounts(
         save_state(state, state_file)
 
 
+def _domain_key(d: dict) -> tuple[str, str]:
+    """Return (host, path) identifying a domain entry uniquely."""
+    return (d["host"], d.get("path") or "/")
+
+
+def _domain_state_key(host: str, path: str) -> str:
+    """State dict key for a domain.
+
+    The root path is stored under the bare host to preserve compatibility with
+    existing state files. Non-root paths use ``host/path``.
+    """
+    if not path or path == "/":
+        return host
+    return f"{host}{path}"
+
+
 def reconcile_domains(
     client: DokployClient,
     resource_id: str,
@@ -310,35 +326,37 @@ def reconcile_domains(
     *,
     compose: bool = False,
 ) -> dict:
-    """Reconcile domains: update existing by host, create new, delete removed.
+    """Reconcile domains: update existing by (host, path), create new, delete removed.
 
-    Returns a dict mapping host -> {"domainId": ...} for state storage.
+    Returns a dict mapping state key -> {"domainId": ...} for state storage.
     """
-    existing_by_host = {d["host"]: d for d in existing}
-    desired_by_host = {d["host"]: d for d in desired}
+    existing_by_key = {_domain_key(d): d for d in existing}
+    desired_by_key = {_domain_key(d): d for d in desired}
 
     result_state = {}
 
-    for host, dom in desired_by_host.items():
+    for key, dom in desired_by_key.items():
+        host, path = key
+        state_key = _domain_state_key(host, path)
         payload = build_domain_payload(resource_id, dom, compose=compose)
-        if host in existing_by_host:
-            ex = existing_by_host[host]
+        if key in existing_by_key:
+            ex = existing_by_key[key]
             domain_id = ex["domainId"]
             needs_update = any(
-                payload.get(key) != ex.get(key)
-                for key in ("port", "https", "certificateType", "customCertResolver", "path", "internalPath", "stripPath")
+                payload.get(k) != ex.get(k)
+                for k in ("port", "https", "certificateType", "customCertResolver", "path", "internalPath", "stripPath")
             )
             if needs_update:
                 update_payload = {k: v for k, v in payload.items() if k not in ("applicationId", "composeId", "domainType")}
                 update_payload["domainId"] = domain_id
                 client.post("domain.update", update_payload)
-            result_state[host] = {"domainId": domain_id}
+            result_state[state_key] = {"domainId": domain_id}
         else:
             resp = client.post("domain.create", payload)
-            result_state[host] = {"domainId": resp["domainId"]}
+            result_state[state_key] = {"domainId": resp["domainId"]}
 
-    for host, ex in existing_by_host.items():
-        if host not in desired_by_host:
+    for key, ex in existing_by_key.items():
+        if key not in desired_by_key:
             client.post("domain.delete", {"domainId": ex["domainId"]})
 
     return result_state

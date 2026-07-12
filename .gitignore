@@ -254,4 +254,5 @@ __marimo__/
 # INCLUDE
 !**/.gitkeep
 !**/*.example
+!examples/**/dokploy.yml
 !AGENTS.md

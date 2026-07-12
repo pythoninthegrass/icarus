@@ -11,6 +11,7 @@ from icarus.payloads import (
     build_security_payload,
     is_compose,
 )
+from icarus.reconcile import _domain_key
 from icarus.schema import get_state_file
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -360,12 +361,13 @@ def _plan_redeploy(
                 remote_domains = []
 
             desired_domains = domain_cfg if isinstance(domain_cfg, list) else [domain_cfg] if domain_cfg else []
-            existing_by_host = {d["host"]: d for d in remote_domains}
-            desired_by_host = {d["host"]: d for d in desired_domains}
+            existing_by_key = {_domain_key(d): d for d in remote_domains}
+            desired_by_key = {_domain_key(d): d for d in desired_domains}
 
-            for host, dom in desired_by_host.items():
-                if host in existing_by_host:
-                    ex = existing_by_host[host]
+            for (host, path), dom in desired_by_key.items():
+                label = host if path == "/" else f"{host}{path}"
+                if (host, path) in existing_by_key:
+                    ex = existing_by_key[(host, path)]
                     diffs: dict = {}
                     for key in ("port", "https", "certificateType", "path", "internalPath", "stripPath"):
                         old_val = ex.get(key)
@@ -377,7 +379,7 @@ def _plan_redeploy(
                             {
                                 "action": "update",
                                 "resource_type": "domain",
-                                "name": host,
+                                "name": label,
                                 "parent": name,
                                 "attrs": diffs,
                             }
@@ -387,7 +389,7 @@ def _plan_redeploy(
                         {
                             "action": "create",
                             "resource_type": "domain",
-                            "name": host,
+                            "name": label,
                             "parent": name,
                             "attrs": {
                                 "host": host,
@@ -398,13 +400,14 @@ def _plan_redeploy(
                         }
                     )
 
-            for host in existing_by_host:
-                if host not in desired_by_host:
+            for host, path in existing_by_key:
+                if (host, path) not in desired_by_key:
+                    label = host if path == "/" else f"{host}{path}"
                     changes.append(
                         {
                             "action": "destroy",
                             "resource_type": "domain",
-                            "name": host,
+                            "name": label,
                             "parent": name,
                             "attrs": {"host": host},
                         }

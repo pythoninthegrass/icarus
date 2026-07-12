@@ -657,6 +657,10 @@
         "stripPath": {
           "type": "boolean",
           "description": "Strip path prefix before forwarding (default: false)"
+        },
+        "serviceName": {
+          "type": "string",
+          "description": "Target service within a compose stack (required for compose-app domains)"
         }
       },
       "if": {

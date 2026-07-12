@@ -1,0 +1,44 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/pythoninthegrass/icarus/main/schemas/dokploy.schema.json
+
+project:
+  name: kestra
+  description: |
+    Kestra workflow orchestrator deployed via Dokploy
+
+  env_targets: [kestra]
+
+  deploy_order:
+    - [kestra]
+
+# Uncomment and populate the github block when the compose stack builds images
+# from source (compose file contains build: directives). Set sourceType: github
+# on the app as well. This causes Dokploy to clone the repo server-side so the
+# build has access to the Dockerfile and all source files.
+# github:
+#   owner: my-org
+#   repository: my-app
+#   branch: main
+
+environments:
+  prod:
+    apps:
+      kestra:
+        domain:
+          host: kestra.nwcrane.com
+          port: 8080
+          https: true
+          certificateType: letsencrypt
+          serviceName: kestra
+
+apps:
+  - name: kestra
+    source: compose
+    # sourceType: github  # uncomment to clone repo server-side (required for build: directives)
+    composeFile: docker-compose.yml
+    composeType: docker-compose
+    # env: |
+    #   POSTGRES_DB=kestra
+    #   POSTGRES_USER=kestra
+    #   POSTGRES_PASSWORD=changeme
+    #   KESTRA_ADMIN_EMAIL=admin@localhost.dev
+    #   KESTRA_ADMIN_PASSWORD=changeme

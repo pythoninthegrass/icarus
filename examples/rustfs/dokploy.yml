@@ -1,0 +1,51 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/pythoninthegrass/icarus/main/schemas/dokploy.schema.json
+
+# RustFS S3-compatible object storage deployed as a compose app.
+#
+# Architecture: single host, path-based split.
+#   s3.example.com/               -> port 9000 (S3 API)
+#   s3.example.com/rustfs/console -> port 9001 (web console)
+#
+# The console SPA is hardcoded to serve under /rustfs/console, so it must live
+# at that path regardless of which host it is on. Both routes share one TLS cert.
+#
+# After deploying, open the console at:
+#   https://s3.example.com/rustfs/console/
+# and enter https://s3.example.com as the server/API address.
+
+project:
+  name: s3
+  description: |
+    RustFS S3-compatible object storage with embedded web console.
+
+  env_targets: [rustfs]
+
+  deploy_order:
+    - [rustfs]
+
+environments:
+  prod:
+    apps:
+      rustfs:
+        domain:
+          - host: s3.example.com
+            port: 9000
+            path: /
+            https: true
+            certificateType: letsencrypt
+            serviceName: rustfs
+          - host: s3.example.com
+            port: 9001
+            path: /rustfs/console
+            https: true
+            certificateType: letsencrypt
+            serviceName: rustfs
+
+apps:
+  - name: rustfs
+    source: compose
+    composeFile: docker-compose.yml
+    composeType: docker-compose
+    env: |
+      RUSTFS_ACCESS_KEY=rustfsadmin
+      RUSTFS_SECRET_KEY=change-me
