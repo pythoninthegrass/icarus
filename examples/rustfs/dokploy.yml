@@ -46,6 +46,5 @@ apps:
     source: compose
     composeFile: docker-compose.yml
     composeType: docker-compose
-    env: |
-      RUSTFS_ACCESS_KEY=rustfsadmin
-      RUSTFS_SECRET_KEY=change-me
+    # Credentials (RUSTFS_ACCESS_KEY / RUSTFS_SECRET_KEY) come from .env,
+    # pushed via env_targets. The compose file consumes them as pass-through.
