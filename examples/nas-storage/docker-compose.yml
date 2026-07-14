@@ -1,0 +1,43 @@
+services:
+  rustfs:
+    image: rustfs/rustfs:latest        # VERIFY: pin to a current released tag
+    restart: unless-stopped
+    security_opt:
+      - "no-new-privileges:true"
+    environment:
+      - RUSTFS_VOLUMES=/data
+      - RUSTFS_ADDRESS=0.0.0.0:9000
+      - RUSTFS_CONSOLE_ADDRESS=0.0.0.0:9001
+      - RUSTFS_CONSOLE_ENABLE=true
+      - RUSTFS_ACCESS_KEY=${RUSTFS_ROOT_USER}
+      - RUSTFS_SECRET_KEY=${RUSTFS_ROOT_PASSWORD}
+      - RUSTFS_CORS_ALLOWED_ORIGINS=https://console.example.com
+      - RUSTFS_LOG=info
+    volumes:
+      - /srv/data/rustfs:/data
+    networks:
+      - dokploy-network
+
+  ocis:
+    image: owncloud/ocis:latest        # VERIFY: pin to a current released tag
+    restart: unless-stopped
+    entrypoint: ["/bin/sh", "-c", "ocis init || true; ocis server"]
+    environment:
+      - OCIS_URL=https://cloud.example.com
+      - PROXY_HTTP_ADDR=0.0.0.0:9200
+      - PROXY_TLS=false
+      - OCIS_INSECURE=false
+      - OCIS_LOG_LEVEL=warn
+      - OCIS_CONFIG_DIR=/etc/ocis
+      - OCIS_BASE_DATA_PATH=/var/lib/ocis
+      - IDM_CREATE_DEMO_USERS=false
+      - IDM_ADMIN_PASSWORD=${OCIS_ADMIN_PASSWORD}
+    volumes:
+      - /srv/data/ocis/config:/etc/ocis
+      - /srv/data/ocis/data:/var/lib/ocis
+    networks:
+      - dokploy-network
+
+networks:
+  dokploy-network:
+    external: true

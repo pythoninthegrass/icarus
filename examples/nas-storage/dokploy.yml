@@ -1,0 +1,83 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/pythoninthegrass/icarus/main/schemas/dokploy.schema.json
+
+# RustFS S3 object storage + ownCloud Infinite Scale (OCIS) on a home NAS.
+#
+# Architecture: home NAS as the data plane, Dokploy VPS as control plane only.
+# User traffic resolves directly to the home IP — no data transits the VPS.
+#
+#   s3.example.com      -> NAS:9000  (RustFS S3 API, SigV4 auth)
+#   console.example.com -> NAS:9001  (RustFS web console, browser login)
+#   cloud.example.com   -> NAS:9200  (OCIS, built-in OIDC/IdP)
+#
+# Prerequisites (verify before deploying):
+#   - Home connection is not CGNAT (curl https://ifconfig.me must match router WAN IP)
+#   - ISP allows inbound 80 and 443
+#   - Router forwards 80/tcp, 443/tcp -> NAS and 2222/tcp -> NAS:22
+#   - NAS added to Dokploy as a Remote Server (Settings -> Servers -> Create Server)
+#   - /srv/data/rustfs and /srv/data/ocis/{config,data} created on NAS
+#   - /srv/data/ocis owned by uid/gid 1000 (OCIS container user)
+#
+# NAS filesystem prep:
+#   sudo mkdir -p /srv/data/rustfs /srv/data/ocis/config /srv/data/ocis/data
+#   sudo chown -R 1000:1000 /srv/data/ocis
+#
+# Traefik tuning required on the NAS (/etc/dokploy/traefik/traefik.yml):
+#   entryPoints.websecure.transport.respondingTimeouts.readTimeout: 3600s
+#   entryPoints.websecure.transport.respondingTimeouts.writeTimeout: 3600s
+#   entryPoints.websecure.transport.respondingTimeouts.idleTimeout: 600s
+#
+# DNS records (all A records pointing at home public IP):
+#   s3.example.com, console.example.com, cloud.example.com
+#
+# Image tags: both services use `latest` here as a placeholder.
+# Pin to an explicit tag in docker-compose.yml before deploying.
+#
+# Environment variables — set in Dokploy compose service's Environment tab:
+#   RUSTFS_ROOT_USER      access key for RustFS root account
+#   RUSTFS_ROOT_PASSWORD  secret key (32+ chars)
+#   OCIS_ADMIN_PASSWORD   OCIS admin password (32+ chars)
+#
+# S3 client config (path-style addressing required — no virtual-hosted buckets):
+#   boto3:  Config(s3={"addressing_style": "path"}, signature_version="s3v4")
+#   awscli: s3.addressing_style = path  (in ~/.aws/config)
+#   rclone: force_path_style = true
+
+project:
+  name: nas-storage
+  description: |
+    RustFS S3 object storage and ownCloud Infinite Scale deployed on a home NAS
+    via Dokploy Remote Server. All data stays on local NVMe; VPS is control plane only.
+
+  env_targets: [storage]
+
+  deploy_order:
+    - [storage]
+
+environments:
+  prod:
+    apps:
+      storage:
+        domain:
+          - host: s3.example.com
+            port: 9000
+            https: true
+            certificateType: letsencrypt
+            serviceName: rustfs
+          - host: console.example.com
+            port: 9001
+            https: true
+            certificateType: letsencrypt
+            serviceName: rustfs
+          - host: cloud.example.com
+            port: 9200
+            https: true
+            certificateType: letsencrypt
+            serviceName: ocis
+
+apps:
+  - name: storage
+    source: compose
+    composeFile: docker-compose.yml
+    composeType: docker-compose
+    # Deploy this service on the NAS remote server (select in Dokploy UI under
+    # the service's General settings -> Server). Do not use the VPS server.

@@ -300,20 +300,35 @@ def cmd_setup(client: DokployClient, cfg: dict, state_file: Path, repo_root: Pat
                 print(f"  Certificate created: {certificate_id}")
             state["certificates"][name] = {"certificateId": certificate_id}
 
+    # 3. Build server name -> ID lookup (populated lazily, cached for the loop)
+    _server_cache: dict[str, str] = {}
+
+    def resolve_server_id(server_name: str) -> str:
+        if server_name not in _server_cache:
+            servers = client.get("server.all")
+            for s in servers:
+                _server_cache[s["name"]] = s["serverId"]
+        server_id = _server_cache.get(server_name)
+        if not server_id:
+            raise SystemExit(f"Server '{server_name}' not found in Dokploy. Check Settings → Servers.")
+        return server_id
+
     # 3. Create apps
     for app_def in cfg["apps"]:
         name = app_def["name"]
+        server_name = app_def.get("server")
+        server_id = resolve_server_id(server_name) if server_name else None
         if is_compose(app_def):
             print(f"Creating compose: {name}...")
             compose_type = app_def.get("composeType", "docker-compose")
-            result = client.post(
-                "compose.create",
-                {
-                    "name": name,
-                    "environmentId": environment_id,
-                    "composeType": compose_type,
-                },
-            )
+            payload: dict = {
+                "name": name,
+                "environmentId": environment_id,
+                "composeType": compose_type,
+            }
+            if server_id:
+                payload["serverId"] = server_id
+            result = client.post("compose.create", payload)
             compose_id = result["composeId"]
             app_name = result["appName"]
             state["apps"][name] = {
@@ -324,9 +339,12 @@ def cmd_setup(client: DokployClient, cfg: dict, state_file: Path, repo_root: Pat
             print(f"  {name}: id={compose_id} appName={app_name}")
         else:
             print(f"Creating app: {name}...")
+            payload = {"name": name, "environmentId": environment_id}
+            if server_id:
+                payload["serverId"] = server_id
             result = client.post(
                 "application.create",
-                {"name": name, "environmentId": environment_id},
+                payload,
             )
             app_id = result["applicationId"]
             app_name = result["appName"]

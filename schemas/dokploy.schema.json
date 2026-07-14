@@ -416,6 +416,10 @@
               "$ref": "#/$defs/redirect"
             },
             "description": "URL redirects (regex-based 301/302)"
+          },
+          "server": {
+            "type": "string",
+            "description": "Target server name (from Dokploy Settings → Servers). Resolves to serverId at setup time."
           }
         },
         "if": {
