@@ -53,6 +53,7 @@ from icarus.reconcile import (
     reconcile_app_settings,
     reconcile_certificates,
     reconcile_database_backups,
+    reconcile_databases,
     reconcile_destinations,
     reconcile_registries,
 )
@@ -62,6 +63,7 @@ from icarus.ssh import (
     get_docker_client,
     get_ssh_config,
     resolve_app_for_exec,
+    resolve_app_name,
     select_container,
     sync_service_envs,
 )
@@ -784,6 +786,7 @@ def cmd_apply(
         reconcile_app_security(client, cfg, load_state(state_file), state_file)
         reconcile_app_redirects(client, cfg, load_state(state_file), state_file)
         reconcile_app_settings(client, cfg, load_state(state_file))
+        reconcile_databases(client, cfg, load_state(state_file), state_file)
         reconcile_database_backups(client, cfg, load_state(state_file), state_file)
 
     print("\n==> Phase 4/4: trigger")
@@ -810,6 +813,21 @@ def cmd_status(client: DokployClient, state_file: Path) -> None:
         remote: dict = client.get(database_endpoint(db_type, "one"), {id_key: info[id_key]})  # type: ignore[assignment]
         status = remote.get("applicationStatus", "unknown")
         print(f"  {name:10s}  {status}  ({db_type})")
+
+
+def cmd_run_schedule(client: DokployClient, state_file: Path, app: str | None, schedule_name: str) -> None:
+    """Manually trigger a schedule via schedule.runManually."""
+    state = load_state(state_file)
+    name = resolve_app_name(state, app)
+    schedules = state["apps"][name].get("schedules", {})
+    if schedule_name not in schedules:
+        available = ", ".join(sorted(schedules)) or "(none)"
+        print(f"ERROR: Unknown schedule '{schedule_name}' for app '{name}'. Available: {available}")
+        sys.exit(1)
+    schedule_id = schedules[schedule_name]["scheduleId"]
+    print(f"Running schedule '{schedule_name}' for {name}...")
+    client.post("schedule.runManually", {"scheduleId": schedule_id})
+    print("  Triggered.")
 
 
 def cmd_logs(client: DokployClient, state_file: Path, app: str | None, follow: bool, tail: int, exited: bool) -> None:

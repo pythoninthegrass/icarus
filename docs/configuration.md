@@ -115,6 +115,14 @@ On first `setup`, ports are created via the Dokploy `port.create` API. On subseq
 
 On first `setup`, schedules are created via the Dokploy `schedule.create` API. On subsequent `apply` (redeploy), schedules are reconciled by name: existing schedules are updated, new ones are created, and removed ones are deleted.
 
+Run a schedule on demand (outside its cron expression) with:
+
+```bash
+ic --env prod run-schedule <app> <schedule-name>
+```
+
+`app` is optional and auto-selects when only one app is configured.
+
 ### Domain Object
 
 | Key                      | Required   | Description                                                                       |
@@ -158,6 +166,8 @@ domain:
   certificateType: custom
   certificate: wildcard-example
 ```
+
+On `apply` (redeploy), certificates removed from `dokploy.yml` are deleted from Dokploy — but only if icarus created them. Deletion is tracked against icarus's own state, not the full list of certificates on the server, so certificates managed outside of icarus (or by other tools) are left alone.
 
 ## Compose Apps
 
@@ -271,6 +281,8 @@ database:
     type: redis
     databasePassword: redis_secret
 ```
+
+On subsequent `apply` (redeploy), `dockerImage` and `description` are diffed against the live database and updated via `<type>.update`. Changing `dockerImage` also triggers `<type>.rebuild` to restart the container on the new image — updating the field alone does not restart it.
 
 ## `{app_name}` Resolution
 

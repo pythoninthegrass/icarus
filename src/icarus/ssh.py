@@ -199,15 +199,15 @@ def get_containers(client: DokployClient, app_name: str) -> list[dict]:
     )
 
 
-def resolve_app_for_exec(state: dict, app_name: str | None) -> str:
-    """Resolve an app name argument to a Dokploy appName from state.
+def resolve_app_name(state: dict, app_name: str | None) -> str:
+    """Resolve an app argument to its config key in state['apps'].
 
     If app_name is None and only one app exists, auto-selects it.
     """
     apps = state["apps"]
     if app_name is None:
         if len(apps) == 1:
-            return next(iter(apps.values()))["appName"]
+            return next(iter(apps))
         names = ", ".join(sorted(apps.keys()))
         print(f"ERROR: Multiple apps found — specify an app: {names}")
         sys.exit(1)
@@ -215,7 +215,16 @@ def resolve_app_for_exec(state: dict, app_name: str | None) -> str:
         names = ", ".join(sorted(apps.keys()))
         print(f"ERROR: Unknown app '{app_name}'. Available: {names}")
         sys.exit(1)
-    return apps[app_name]["appName"]
+    return app_name
+
+
+def resolve_app_for_exec(state: dict, app_name: str | None) -> str:
+    """Resolve an app name argument to a Dokploy appName from state.
+
+    If app_name is None and only one app exists, auto-selects it.
+    """
+    name = resolve_app_name(state, app_name)
+    return state["apps"][name]["appName"]
 
 
 def select_container(containers: list[dict], exited: bool, for_exec: bool = False) -> dict:

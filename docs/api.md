@@ -44,6 +44,16 @@ Requires the `x-api-key` header.
 
 - **`project.create`** returns a nested structure: `{"project": {...}, "environment": {...}}`.
 
+- **`schedule.runManually`**: POST with `{"scheduleId": "..."}`. Triggers an on-demand run of a configured schedule outside its cron expression. Exposed via `ic run-schedule <app> <name>`.
+
+- **`<type>.update`** (databases): Diffed against `<type>.one` on every redeploy for `dockerImage` and `description` drift. Only changed fields are sent, plus the id field (e.g. `postgresId`).
+
+- **`<type>.rebuild`**: Required after a database `dockerImage` change — `<type>.update` alone does not restart the container with the new image. Called automatically after `<type>.update` whenever `dockerImage` changed.
+
+- **`registry.testRegistry`** / **`destination.testConnection`**: Called immediately after `registry.create`/`.update` and `destination.create`/`.update` respectively, reusing the same create payload. A failed connection test (`httpx.HTTPStatusError`) aborts the reconcile with a `SystemExit` — better to fail fast during `apply` than discover bad credentials mid-deploy.
+
+- **`certificates.remove`**: POST with `{"certificateId": "..."}`. `reconcile_certificates` now deletes certificates that were previously created by icarus (tracked in state) but removed from `dokploy.yml`. Deletion is scoped to icarus-tracked certificates only — `certificates.all` returns every certificate in the organization, not just icarus's, so diffing is done against `state["certificates"]`, not the full remote list.
+
 ## Known Server-Side Issues
 
 - **Stale Traefik configs after project destroy**: `project.remove` deletes the

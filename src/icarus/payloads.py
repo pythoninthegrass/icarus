@@ -54,6 +54,27 @@ def build_database_create_payload(name: str, db_def: dict, environment_id: str) 
     return payload
 
 
+def build_database_update_payload(db_id: str, db_type: str, db_def: dict, remote: dict) -> dict | None:
+    """Build the API payload for `<type>.update`, diffing dockerImage/description against remote state.
+
+    Returns None if no update is needed.
+    """
+    id_key = database_id_key(db_type)
+    payload: dict = {id_key: db_id}
+    changed = False
+
+    desired_image = db_def.get("dockerImage", DATABASE_DEFAULTS[db_type])
+    if remote.get("dockerImage") != desired_image:
+        payload["dockerImage"] = desired_image
+        changed = True
+
+    if "description" in db_def and remote.get("description") != db_def["description"]:
+        payload["description"] = db_def["description"]
+        changed = True
+
+    return payload if changed else None
+
+
 def build_github_provider_payload(app_id: str, app_def: dict, github_cfg: dict, github_id: str) -> dict:
     """Build payload for application.saveGithubProvider."""
     return {

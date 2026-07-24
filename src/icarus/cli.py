@@ -23,6 +23,7 @@ from icarus.commands import (
     cmd_exec,
     cmd_import,
     cmd_logs,
+    cmd_run_schedule,
     cmd_setup,
     cmd_status,
     cmd_trigger,
@@ -76,6 +77,10 @@ def main() -> None:
     exec_parser.add_argument("--exited", action="store_true", help="Pick from all containers (including exited)")
     exec_parser.add_argument("cmd", nargs=argparse.REMAINDER, help="Command to run (default: sh)")
 
+    run_schedule_parser = sub.add_parser("run-schedule", help="Manually trigger a schedule")
+    run_schedule_parser.add_argument("app", nargs="?", default=None, help="App name (auto-selects if only one)")
+    run_schedule_parser.add_argument("schedule", help="Schedule name (as defined in dokploy.yml)")
+
     args = parser.parse_args()
     if args.command is None:
         parser.print_help()
@@ -91,15 +96,17 @@ def main() -> None:
     base_url: str = config("DOKPLOY_URL", default="https://dokploy.example.com")  # type: ignore[assignment]
     client = DokployClient(base_url, api_key)
 
-    if args.command in ("logs", "exec"):
+    if args.command in ("logs", "exec", "run-schedule"):
         state_file = get_state_file(Path.cwd(), env_name)
         if args.command == "logs":
             cmd_logs(client, state_file, args.app, args.follow, args.tail, args.exited)
-        else:
+        elif args.command == "exec":
             exec_cmd = args.cmd if args.cmd else None
             if exec_cmd and exec_cmd[0] == "--":
                 exec_cmd = exec_cmd[1:]
             cmd_exec(client, state_file, args.app, args.exited, exec_cmd or None)
+        else:
+            cmd_run_schedule(client, state_file, args.app, args.schedule)
         return
 
     repo_root = find_repo_root()

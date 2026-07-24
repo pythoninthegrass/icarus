@@ -1343,6 +1343,29 @@ class TestGetSshConfig:
         assert "DOKPLOY_SSH_HOST" in capsys.readouterr().out
 
 
+class TestResolveAppName:
+    def test_resolves_known_name(self):
+        state = _state_with_app("web", "app-123", "app-foo-bar-abc")
+        assert dokploy.resolve_app_name(state, "web") == "web"
+
+    def test_unknown_app_exits(self, capsys):
+        state = _state_with_app("web", "app-123", "app-foo-bar-abc")
+        with pytest.raises(SystemExit):
+            dokploy.resolve_app_name(state, "nonexistent")
+        assert "Unknown app" in capsys.readouterr().out
+
+    def test_single_app_auto_selects(self):
+        state = _state_with_app("web", "app-123", "app-foo-bar-abc")
+        assert dokploy.resolve_app_name(state, None) == "web"
+
+    def test_multiple_apps_no_name_exits(self, capsys):
+        state = _state_with_app("web", "app-123", "app-foo-bar-abc")
+        state["apps"]["worker"] = {"applicationId": "app-456", "appName": "app-baz-qux-def"}
+        with pytest.raises(SystemExit):
+            dokploy.resolve_app_name(state, None)
+        assert "specify an app" in capsys.readouterr().out
+
+
 class TestResolveAppForExec:
     def test_resolves_from_state(self):
         state = _state_with_app("web", "app-123", "app-foo-bar-abc")
@@ -4355,6 +4378,96 @@ class TestReconcileRegistries:
         assert update_calls[0][0][1]["registryId"] == "reg-old"
 
 
+class TestReconcileRegistriesConnectionTest:
+    def test_tests_connection_after_create(self, registry_config):
+        state = {"projectId": "proj-1", "environmentId": "env-1", "apps": {}}
+        state_file = MagicMock()
+
+        client = MagicMock()
+        client.get = MagicMock(return_value=[])
+        client.post = MagicMock(return_value={"registryId": "reg-new"})
+
+        from icarus.reconcile import reconcile_registries
+
+        reconcile_registries(client, registry_config, state, state_file)
+
+        test_calls = [c for c in client.post.call_args_list if c[0][0] == "registry.testRegistry"]
+        assert len(test_calls) == 1
+
+    def test_failed_connection_test_exits(self, registry_config):
+        state = {"projectId": "proj-1", "environmentId": "env-1", "apps": {}}
+        state_file = MagicMock()
+
+        client = MagicMock()
+        client.get = MagicMock(return_value=[])
+
+        def fake_post(endpoint, payload=None):
+            if endpoint == "registry.testRegistry":
+                raise httpx.HTTPStatusError("400 Bad Request", request=MagicMock(), response=MagicMock())
+            return {"registryId": "reg-new"}
+
+        client.post = MagicMock(side_effect=fake_post)
+
+        from icarus.reconcile import reconcile_registries
+
+        with pytest.raises(SystemExit):
+            reconcile_registries(client, registry_config, state, state_file)
+
+
+class TestReconcileDestinationsConnectionTest:
+    def test_tests_connection_after_create(self):
+        client = MagicMock()
+        client.get.return_value = []
+        client.post.return_value = {"destinationId": "dest-new"}
+        cfg = {
+            "destinations": [
+                {
+                    "name": "s3",
+                    "accessKey": "k",
+                    "secretAccessKey": "s",
+                    "bucket": "b",
+                    "region": "r",
+                    "endpoint": "e",
+                }
+            ],
+        }
+        state = {"destinations": {}}
+        state_file = MagicMock()
+
+        dokploy.reconcile_destinations(client, cfg, state, state_file)
+
+        test_calls = [c for c in client.post.call_args_list if c[0][0] == "destination.testConnection"]
+        assert len(test_calls) == 1
+
+    def test_failed_connection_test_exits(self):
+        client = MagicMock()
+        client.get.return_value = []
+        cfg = {
+            "destinations": [
+                {
+                    "name": "s3",
+                    "accessKey": "k",
+                    "secretAccessKey": "s",
+                    "bucket": "b",
+                    "region": "r",
+                    "endpoint": "e",
+                }
+            ],
+        }
+        state = {"destinations": {}}
+        state_file = MagicMock()
+
+        def fake_post(endpoint, payload=None):
+            if endpoint == "destination.testConnection":
+                raise httpx.HTTPStatusError("400 Bad Request", request=MagicMock(), response=MagicMock())
+            return {"destinationId": "dest-new"}
+
+        client.post = MagicMock(side_effect=fake_post)
+
+        with pytest.raises(SystemExit):
+            dokploy.reconcile_destinations(client, cfg, state, state_file)
+
+
 class TestReconcileAppRegistry:
     def test_reconcile_app_registry_changed(self):
         client = MagicMock()
@@ -5812,6 +5925,142 @@ class TestReconcileDatabaseBackups:
         client.post.assert_not_called()
 
 
+class TestBuildDatabaseUpdatePayload:
+    def test_no_change_returns_none(self):
+        remote = {"dockerImage": "postgres:16"}
+        db_def = {"name": "mydb", "type": "postgres", "databasePassword": "p"}
+        payload = dokploy.build_database_update_payload("pg-1", "postgres", db_def, remote)
+        assert payload is None
+
+    def test_image_change_detected(self):
+        remote = {"dockerImage": "postgres:15"}
+        db_def = {"name": "mydb", "type": "postgres", "databasePassword": "p", "dockerImage": "postgres:16"}
+        payload = dokploy.build_database_update_payload("pg-1", "postgres", db_def, remote)
+        assert payload == {"postgresId": "pg-1", "dockerImage": "postgres:16"}
+
+    def test_description_change_detected(self):
+        remote = {"dockerImage": "postgres:16", "description": "old"}
+        db_def = {
+            "name": "mydb",
+            "type": "postgres",
+            "databasePassword": "p",
+            "description": "new",
+        }
+        payload = dokploy.build_database_update_payload("pg-1", "postgres", db_def, remote)
+        assert payload == {"postgresId": "pg-1", "description": "new"}
+
+    def test_default_image_used_when_unset(self):
+        remote = {"dockerImage": "redis:6"}
+        db_def = {"name": "cache", "type": "redis", "databasePassword": "p"}
+        payload = dokploy.build_database_update_payload("r-1", "redis", db_def, remote)
+        assert payload == {"redisId": "r-1", "dockerImage": "redis:7"}
+
+
+class TestReconcileDatabases:
+    def test_updates_image_and_rebuilds(self):
+        client = MagicMock()
+        client.get.return_value = {"dockerImage": "postgres:15"}
+        cfg = {
+            "database": [
+                {
+                    "name": "mydb",
+                    "type": "postgres",
+                    "databaseName": "myapp",
+                    "databaseUser": "u",
+                    "databasePassword": "p",
+                    "dockerImage": "postgres:16",
+                }
+            ],
+        }
+        state = {"database": {"mydb": {"postgresId": "pg-1", "appName": "mydb-app", "type": "postgres"}}}
+        state_file = MagicMock()
+
+        dokploy.reconcile_databases(client, cfg, state, state_file)
+
+        update_calls = [c for c in client.post.call_args_list if c[0][0] == "postgres.update"]
+        rebuild_calls = [c for c in client.post.call_args_list if c[0][0] == "postgres.rebuild"]
+        assert len(update_calls) == 1
+        assert update_calls[0][0][1] == {"postgresId": "pg-1", "dockerImage": "postgres:16"}
+        assert len(rebuild_calls) == 1
+        assert rebuild_calls[0][0][1] == {"postgresId": "pg-1"}
+
+    def test_no_drift_no_calls(self):
+        client = MagicMock()
+        client.get.return_value = {"dockerImage": "postgres:16"}
+        cfg = {
+            "database": [
+                {
+                    "name": "mydb",
+                    "type": "postgres",
+                    "databaseName": "myapp",
+                    "databaseUser": "u",
+                    "databasePassword": "p",
+                }
+            ],
+        }
+        state = {"database": {"mydb": {"postgresId": "pg-1", "appName": "mydb-app", "type": "postgres"}}}
+        state_file = MagicMock()
+
+        dokploy.reconcile_databases(client, cfg, state, state_file)
+
+        client.post.assert_not_called()
+
+    def test_description_only_change_no_rebuild(self):
+        client = MagicMock()
+        client.get.return_value = {"dockerImage": "redis:7", "description": "old"}
+        cfg = {
+            "database": [
+                {
+                    "name": "cache",
+                    "type": "redis",
+                    "databasePassword": "p",
+                    "description": "new",
+                }
+            ],
+        }
+        state = {"database": {"cache": {"redisId": "r-1", "appName": "cache-app", "type": "redis"}}}
+        state_file = MagicMock()
+
+        dokploy.reconcile_databases(client, cfg, state, state_file)
+
+        update_calls = [c for c in client.post.call_args_list if c[0][0] == "redis.update"]
+        rebuild_calls = [c for c in client.post.call_args_list if c[0][0] == "redis.rebuild"]
+        assert len(update_calls) == 1
+        assert len(rebuild_calls) == 0
+
+    def test_skips_when_no_databases(self):
+        client = MagicMock()
+        cfg = {}
+        state = {}
+        state_file = MagicMock()
+
+        dokploy.reconcile_databases(client, cfg, state, state_file)
+
+        client.get.assert_not_called()
+        client.post.assert_not_called()
+
+    def test_skips_db_not_yet_in_state(self):
+        client = MagicMock()
+        cfg = {
+            "database": [
+                {
+                    "name": "newdb",
+                    "type": "postgres",
+                    "databaseName": "myapp",
+                    "databaseUser": "u",
+                    "databasePassword": "p",
+                }
+            ],
+        }
+        state = {"database": {}}
+        state_file = MagicMock()
+
+        dokploy.reconcile_databases(client, cfg, state, state_file)
+
+        client.get.assert_not_called()
+        client.post.assert_not_called()
+
+
 class TestBuildCertificateCreatePayload:
     def test_reads_cert_and_key_files(self, tmp_path):
         cert_file = tmp_path / "cert.pem"
@@ -6008,6 +6257,45 @@ class TestReconcileCertificates:
         dokploy.reconcile_certificates(client, cfg, state, state_file, repo_root=Path("/tmp"))
 
         client.post.assert_not_called()
+
+    def test_deletes_removed_certificate(self):
+        client = MagicMock()
+        client.get.return_value = []
+        client.post.return_value = {}
+        cfg = {"certificates": []}
+        state = {
+            "certificates": {"stale": {"certificateId": "cert-stale"}},
+            "organizationId": "org-1",
+        }
+        state_file = MagicMock()
+
+        dokploy.reconcile_certificates(client, cfg, state, state_file, repo_root=Path("/tmp"))
+
+        remove_calls = [c for c in client.post.call_args_list if c[0][0] == "certificates.remove"]
+        assert len(remove_calls) == 1
+        assert remove_calls[0][0][1] == {"certificateId": "cert-stale"}
+        assert "stale" not in state["certificates"]
+
+    def test_keeps_certificate_still_in_config(self):
+        client = MagicMock()
+        client.get.return_value = [{"certificateId": "cert-1", "name": "wildcard"}]
+        cfg = {
+            "certificates": [
+                {
+                    "name": "wildcard",
+                    "certFile": "cert.pem",
+                    "keyFile": "key.pem",
+                }
+            ],
+        }
+        state = {"certificates": {"wildcard": {"certificateId": "cert-1"}}, "organizationId": "org-1"}
+        state_file = MagicMock()
+
+        dokploy.reconcile_certificates(client, cfg, state, state_file, repo_root=Path("/tmp"))
+
+        remove_calls = [c for c in client.post.call_args_list if c[0][0] == "certificates.remove"]
+        assert len(remove_calls) == 0
+        assert "wildcard" in state["certificates"]
 
 
 class TestPlanCertificates:
@@ -6457,3 +6745,59 @@ class TestCmdSetupComposeGithub:
 
         get_calls = [c[0][0] for c in client.get.call_args_list]
         assert "github.githubProviders" in get_calls
+
+
+class TestCmdRunSchedule:
+    def _state_file_with_schedule(self, tmp_path):
+        state_file = tmp_path / ".dokploy-state" / "test.json"
+        state = {
+            "projectId": "proj-1",
+            "apps": {
+                "web": {
+                    "applicationId": "app-1",
+                    "appName": "app-web-abc",
+                    "schedules": {"nightly": {"scheduleId": "sched-1"}},
+                }
+            },
+        }
+        dokploy.save_state(state, state_file, quiet=True)
+        return state_file
+
+    def test_triggers_schedule_by_name(self, tmp_path):
+        state_file = self._state_file_with_schedule(tmp_path)
+        client = MagicMock()
+        client.post.return_value = {}
+
+        dokploy.cmd_run_schedule(client, state_file, "web", "nightly")
+
+        run_calls = [c for c in client.post.call_args_list if c[0][0] == "schedule.runManually"]
+        assert len(run_calls) == 1
+        assert run_calls[0][0][1] == {"scheduleId": "sched-1"}
+
+    def test_auto_selects_single_app(self, tmp_path):
+        state_file = self._state_file_with_schedule(tmp_path)
+        client = MagicMock()
+        client.post.return_value = {}
+
+        dokploy.cmd_run_schedule(client, state_file, None, "nightly")
+
+        run_calls = [c for c in client.post.call_args_list if c[0][0] == "schedule.runManually"]
+        assert len(run_calls) == 1
+
+    def test_unknown_schedule_exits(self, tmp_path, capsys):
+        state_file = self._state_file_with_schedule(tmp_path)
+        client = MagicMock()
+
+        with pytest.raises(SystemExit):
+            dokploy.cmd_run_schedule(client, state_file, "web", "nonexistent")
+        assert "Unknown schedule" in capsys.readouterr().out
+        client.post.assert_not_called()
+
+    def test_unknown_app_exits(self, tmp_path, capsys):
+        state_file = self._state_file_with_schedule(tmp_path)
+        client = MagicMock()
+
+        with pytest.raises(SystemExit):
+            dokploy.cmd_run_schedule(client, state_file, "nonexistent", "nightly")
+        assert "Unknown app" in capsys.readouterr().out
+        client.post.assert_not_called()

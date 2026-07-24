@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import httpx
 from icarus.client import save_state
 from icarus.env import resolve_refs
 from icarus.payloads import (
     build_app_settings_payload,
     build_backup_create_payload,
     build_certificate_create_payload,
+    build_database_update_payload,
     build_destination_create_payload,
     build_destination_update_payload,
     build_domain_payload,
@@ -16,6 +18,7 @@ from icarus.payloads import (
     build_registry_update_payload,
     build_schedule_payload,
     build_security_payload,
+    database_endpoint,
     database_id_key,
     is_compose,
     resolve_registry_id,
@@ -458,6 +461,11 @@ def reconcile_registries(
             registry_id = resp["registryId"]
         state["registries"][name] = {"registryId": registry_id}
 
+        try:
+            client.post("registry.testRegistry", build_registry_create_payload(reg_def))
+        except httpx.HTTPStatusError as exc:
+            raise SystemExit(f"ERROR: Registry connection test failed for '{name}': {exc}") from exc
+
     save_state(state, state_file)
 
 
@@ -581,6 +589,11 @@ def reconcile_destinations(
             destination_id = resp["destinationId"]
         state["destinations"][name] = {"destinationId": destination_id}
 
+        try:
+            client.post("destination.testConnection", build_destination_create_payload(dest_def))
+        except httpx.HTTPStatusError as exc:
+            raise SystemExit(f"ERROR: Destination connection test failed for '{name}': {exc}") from exc
+
     save_state(state, state_file)
 
 
@@ -592,9 +605,10 @@ def reconcile_certificates(
     *,
     repo_root: Path | None = None,
 ) -> None:
-    """Reconcile certificates: create missing, skip existing."""
+    """Reconcile certificates: create missing, update existing (none), delete removed."""
     certificates_cfg = cfg.get("certificates", [])
-    if not certificates_cfg:
+    existing_state = state.get("certificates", {})
+    if not certificates_cfg and not existing_state:
         return
 
     existing_certs = client.get("certificates.all")
@@ -606,8 +620,10 @@ def reconcile_certificates(
     organization_id = state.get("organizationId", "")
     effective_root = repo_root or Path(".")
 
+    desired_names = set()
     for cert_def in certificates_cfg:
         name = cert_def["name"]
+        desired_names.add(name)
         if name in existing_by_name:
             certificate_id = existing_by_name[name]["certificateId"]
         else:
@@ -616,7 +632,37 @@ def reconcile_certificates(
             certificate_id = resp["certificateId"]
         state["certificates"][name] = {"certificateId": certificate_id}
 
+    for name in list(state["certificates"]):
+        if name not in desired_names:
+            certificate_id = state["certificates"][name]["certificateId"]
+            client.post("certificates.remove", {"certificateId": certificate_id})
+            del state["certificates"][name]
+
     save_state(state, state_file)
+
+
+def reconcile_databases(
+    client: DokployClient,
+    cfg: dict,
+    state: dict,
+    state_file: Path,
+) -> None:
+    """Reconcile database drift (image, description) and rebuild on image change."""
+    for db_def in cfg.get("database", []):
+        name = db_def["name"]
+        db_type = db_def["type"]
+        id_key = database_id_key(db_type)
+        db_info = state.get("database", {}).get(name)
+        if not db_info:
+            continue
+        db_id = db_info[id_key]
+        remote = client.get(database_endpoint(db_type, "one"), {id_key: db_id})
+        update_payload = build_database_update_payload(db_id, db_type, db_def, remote)
+        if update_payload is None:
+            continue
+        client.post(database_endpoint(db_type, "update"), update_payload)
+        if "dockerImage" in update_payload:
+            client.post(database_endpoint(db_type, "rebuild"), {id_key: db_id})
 
 
 def reconcile_database_backups(
