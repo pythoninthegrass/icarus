@@ -38,6 +38,8 @@ Requires the `x-api-key` header.
 
 - **`application.saveEnvironment`**: `createEnvFile` (boolean) became a required field in Dokploy v0.28.4 (added in v0.26.1 as optional, promoted to required later). Controls whether env vars are written to a `.env` file in the container's working directory. Set `false` to preserve pre-v0.26.1 behavior (env vars injected as process environment only).
 
+- **`application.update` (resource limits / health check / restart policy)**: `memoryLimit`, `memoryReservation`, `cpuLimit`, and `cpuReservation` are nullable *strings* - byte counts for memory (e.g. `"536870912"` for 512M) and nanocores for CPU (`"1000000000"` = 1 CPU). `healthCheckSwarm` and `restartPolicySwarm` are nullable objects with Docker-cased keys (`Test`, `Interval`, `Timeout`, `StartPeriod`, `Retries` / `Condition`, `Delay`, `MaxAttempts`, `Window`); durations are numbers in *nanoseconds*. Both objects use `additionalProperties: false`. icarus maps the friendlier `resources`/`healthCheck`/`restartPolicy` config blocks to these fields, converting `512M`-style sizes, CPU counts, and `30s`-style durations.
+
 - **`mounts.create`**: Creates a persistent mount for an application. Required fields: `type` (`volume` or `bind`), `mountPath` (container path), `serviceId` (the application ID). Optional: `serviceType` (defaults to `application`). For `type: volume`, send `volumeName`; for `type: bind`, send `hostPath`. Note: the schema uses `additionalProperties: false` — do not send `applicationId`.
 
 - **`application.deploy`** triggers a fresh build and deploy. Returns an empty response body on success. Since v0.26.2, deployments execute asynchronously in the background — the endpoint returns immediately.

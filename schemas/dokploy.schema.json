@@ -163,6 +163,15 @@
                   "minimum": 1,
                   "description": "Number of app replicas"
                 },
+                "resources": {
+                  "$ref": "#/$defs/resources"
+                },
+                "healthCheck": {
+                  "$ref": "#/$defs/health_check"
+                },
+                "restartPolicy": {
+                  "$ref": "#/$defs/restart_policy"
+                },
                 "buildPath": {
                   "type": "string",
                   "description": "Build path for GitHub provider (default: /)"
@@ -354,6 +363,15 @@
             "minimum": 1,
             "description": "Number of app replicas"
           },
+          "resources": {
+            "$ref": "#/$defs/resources"
+          },
+          "healthCheck": {
+            "$ref": "#/$defs/health_check"
+          },
+          "restartPolicy": {
+            "$ref": "#/$defs/restart_policy"
+          },
           "buildPath": {
             "type": "string",
             "description": "Build path for GitHub provider (default: /)"
@@ -473,6 +491,96 @@
     }
   },
   "$defs": {
+    "resources": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Container resource limits and reservations (applied via Docker swarm)",
+      "properties": {
+        "memoryLimit": {
+          "type": ["string", "integer"],
+          "description": "Memory hard limit: bytes as integer, or string with 1024-based K/M/G/T suffix (e.g. 512M, 1G)"
+        },
+        "memoryReservation": {
+          "type": ["string", "integer"],
+          "description": "Memory soft reservation: bytes as integer, or string with 1024-based K/M/G/T suffix (e.g. 256M)"
+        },
+        "cpuLimit": {
+          "type": ["string", "number"],
+          "description": "CPU hard limit in CPUs (e.g. 0.5, 1, 2)"
+        },
+        "cpuReservation": {
+          "type": ["string", "number"],
+          "description": "CPU soft reservation in CPUs (e.g. 0.25)"
+        }
+      }
+    },
+    "health_check": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Docker swarm health check for the app container",
+      "properties": {
+        "command": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          ],
+          "description": "Check command: string runs via shell (CMD-SHELL), list is the raw swarm Test array (e.g. [CMD, curl, -f, ...])"
+        },
+        "interval": {
+          "type": ["string", "number"],
+          "description": "Time between checks (e.g. 30s, 1m; bare numbers are seconds)"
+        },
+        "timeout": {
+          "type": ["string", "number"],
+          "description": "Time a check may run before it is considered failed (e.g. 10s)"
+        },
+        "startPeriod": {
+          "type": ["string", "number"],
+          "description": "Grace period before failures count against retries (e.g. 60s)"
+        },
+        "retries": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Consecutive failures needed to mark the container unhealthy"
+        }
+      }
+    },
+    "restart_policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Docker swarm restart policy for the app container",
+      "properties": {
+        "condition": {
+          "type": "string",
+          "enum": [
+            "none",
+            "on-failure",
+            "any"
+          ],
+          "description": "When to restart the container"
+        },
+        "delay": {
+          "type": ["string", "number"],
+          "description": "Delay between restart attempts (e.g. 5s; bare numbers are seconds)"
+        },
+        "maxAttempts": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Maximum restart attempts within the window (0 = unlimited)"
+        },
+        "window": {
+          "type": ["string", "number"],
+          "description": "Window used to evaluate maxAttempts (e.g. 120s)"
+        }
+      }
+    },
     "volume": {
       "type": "object",
       "required": [

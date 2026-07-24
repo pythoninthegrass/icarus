@@ -595,6 +595,164 @@ class TestBuildAppSettingsPayload:
         assert result is not None
         assert result["autoDeploy"] is False
 
+    def test_resources_full(self):
+        """resources block maps to string-valued limit/reservation fields."""
+        app_def = {
+            "name": "web",
+            "resources": {
+                "memoryLimit": "512M",
+                "memoryReservation": "256M",
+                "cpuLimit": 1,
+                "cpuReservation": 0.5,
+            },
+        }
+        result = dokploy.build_app_settings_payload("app-1", app_def)
+        assert result == {
+            "applicationId": "app-1",
+            "memoryLimit": "536870912",
+            "memoryReservation": "268435456",
+            "cpuLimit": "1000000000",
+            "cpuReservation": "500000000",
+        }
+
+    def test_resources_partial(self):
+        """Only the resource keys present in config are sent."""
+        app_def = {"name": "web", "resources": {"memoryLimit": "1G"}}
+        result = dokploy.build_app_settings_payload("app-1", app_def)
+        assert result == {"applicationId": "app-1", "memoryLimit": "1073741824"}
+
+    def test_health_check_string_command(self):
+        """String command becomes a CMD-SHELL Test with durations in nanoseconds."""
+        app_def = {
+            "name": "web",
+            "healthCheck": {
+                "command": "curl -f http://localhost/health",
+                "interval": "30s",
+                "timeout": "10s",
+                "startPeriod": "60s",
+                "retries": 3,
+            },
+        }
+        result = dokploy.build_app_settings_payload("app-1", app_def)
+        assert result["healthCheckSwarm"] == {
+            "Test": ["CMD-SHELL", "curl -f http://localhost/health"],
+            "Interval": 30_000_000_000,
+            "Timeout": 10_000_000_000,
+            "StartPeriod": 60_000_000_000,
+            "Retries": 3,
+        }
+
+    def test_health_check_list_command(self):
+        """List command is used as the swarm Test array verbatim."""
+        app_def = {
+            "name": "web",
+            "healthCheck": {"command": ["CMD", "curl", "-f", "http://localhost/health"]},
+        }
+        result = dokploy.build_app_settings_payload("app-1", app_def)
+        assert result["healthCheckSwarm"] == {
+            "Test": ["CMD", "curl", "-f", "http://localhost/health"],
+        }
+
+    def test_restart_policy(self):
+        """restartPolicy maps to restartPolicySwarm with nanosecond durations."""
+        app_def = {
+            "name": "web",
+            "restartPolicy": {
+                "condition": "on-failure",
+                "delay": "5s",
+                "maxAttempts": 3,
+                "window": "120s",
+            },
+        }
+        result = dokploy.build_app_settings_payload("app-1", app_def)
+        assert result["restartPolicySwarm"] == {
+            "Condition": "on-failure",
+            "Delay": 5_000_000_000,
+            "MaxAttempts": 3,
+            "Window": 120_000_000_000,
+        }
+
+
+class TestParseMemoryBytes:
+    def test_int_is_bytes(self):
+        """Plain integers are byte counts."""
+        assert dokploy.parse_memory_bytes(536870912) == "536870912"
+
+    def test_bare_numeric_string_is_bytes(self):
+        """Numeric strings without a suffix are byte counts."""
+        assert dokploy.parse_memory_bytes("1024") == "1024"
+
+    def test_binary_suffixes(self):
+        """K/M/G/T suffixes are 1024-based (Docker convention)."""
+        assert dokploy.parse_memory_bytes("512M") == "536870912"
+        assert dokploy.parse_memory_bytes("1G") == "1073741824"
+        assert dokploy.parse_memory_bytes("2K") == "2048"
+        assert dokploy.parse_memory_bytes("1T") == "1099511627776"
+
+    def test_suffix_variants(self):
+        """MB/MiB/lowercase variants are accepted and 1024-based."""
+        assert dokploy.parse_memory_bytes("256MB") == "268435456"
+        assert dokploy.parse_memory_bytes("256MiB") == "268435456"
+        assert dokploy.parse_memory_bytes("256m") == "268435456"
+
+    def test_fractional_value(self):
+        """Fractional values are converted and truncated to whole bytes."""
+        assert dokploy.parse_memory_bytes("1.5G") == "1610612736"
+
+    def test_invalid_raises(self):
+        """Unknown suffixes and non-numeric input raise ValueError."""
+        with pytest.raises(ValueError):
+            dokploy.parse_memory_bytes("12X")
+        with pytest.raises(ValueError):
+            dokploy.parse_memory_bytes("abc")
+
+
+class TestParseCpuNanos:
+    def test_whole_cpu(self):
+        """1 CPU is 1e9 nanocores."""
+        assert dokploy.parse_cpu_nanos(1) == "1000000000"
+
+    def test_fractional_cpu(self):
+        """Fractional CPUs convert to proportional nanocores."""
+        assert dokploy.parse_cpu_nanos(0.5) == "500000000"
+
+    def test_string_values(self):
+        """Numeric strings are accepted."""
+        assert dokploy.parse_cpu_nanos("2") == "2000000000"
+        assert dokploy.parse_cpu_nanos("0.25") == "250000000"
+
+    def test_invalid_raises(self):
+        """Non-numeric input raises ValueError."""
+        with pytest.raises(ValueError):
+            dokploy.parse_cpu_nanos("fast")
+
+
+class TestParseDurationNanos:
+    def test_seconds(self):
+        """Second suffix converts to nanoseconds."""
+        assert dokploy.parse_duration_nanos("30s") == 30_000_000_000
+
+    def test_minutes_and_hours(self):
+        """Minute and hour suffixes convert to nanoseconds."""
+        assert dokploy.parse_duration_nanos("1m") == 60_000_000_000
+        assert dokploy.parse_duration_nanos("1h") == 3_600_000_000_000
+
+    def test_milliseconds(self):
+        """Millisecond suffix converts to nanoseconds."""
+        assert dokploy.parse_duration_nanos("500ms") == 500_000_000
+
+    def test_bare_number_is_seconds(self):
+        """Numbers (and bare numeric strings) are treated as seconds."""
+        assert dokploy.parse_duration_nanos(10) == 10_000_000_000
+        assert dokploy.parse_duration_nanos("5") == 5_000_000_000
+
+    def test_invalid_raises(self):
+        """Unknown units raise ValueError."""
+        with pytest.raises(ValueError):
+            dokploy.parse_duration_nanos("5d")
+        with pytest.raises(ValueError):
+            dokploy.parse_duration_nanos("soon")
+
 
 class TestBuildMountPayload:
     def test_volume_mount(self):
@@ -4014,6 +4172,126 @@ class TestPlanAppConfigChanges:
         assert len(settings_changes) == 1
         assert settings_changes[0]["attrs"]["replicas"] == (1, 3)
 
+    def test_plan_redeploy_shows_resources_and_health_check_change(self, tmp_path):
+        """_plan_redeploy detects resource limit and health check drift."""
+        state = {
+            "projectId": "proj-1",
+            "apps": {
+                "web": {
+                    "applicationId": "app-1",
+                },
+            },
+        }
+        cfg = {
+            "project": {"name": "test", "description": "test"},
+            "apps": [
+                {
+                    "name": "web",
+                    "source": "docker",
+                    "dockerImage": "nginx",
+                    "resources": {"memoryLimit": "512M"},
+                    "healthCheck": {"command": "curl -f http://localhost/health", "retries": 3},
+                },
+            ],
+        }
+
+        client = MagicMock()
+
+        def mock_get(endpoint, params=None):
+            if endpoint == "application.one":
+                return {
+                    "env": "",
+                    "memoryLimit": None,
+                    "healthCheckSwarm": None,
+                    "mounts": [],
+                    "ports": [],
+                }
+            return {}
+
+        client.get.side_effect = mock_get
+
+        changes = []
+        dokploy._plan_redeploy(client, cfg, state, tmp_path, changes)
+
+        settings_changes = [c for c in changes if c["resource_type"] == "settings"]
+        assert len(settings_changes) == 1
+        assert settings_changes[0]["attrs"]["memoryLimit"] == (None, "536870912")
+        assert settings_changes[0]["attrs"]["healthCheckSwarm"] == (
+            None,
+            {"Test": ["CMD-SHELL", "curl -f http://localhost/health"], "Retries": 3},
+        )
+
+    def test_plan_redeploy_no_change_when_resources_match(self, tmp_path):
+        """_plan_redeploy reports nothing when remote matches resources config."""
+        state = {
+            "projectId": "proj-1",
+            "apps": {
+                "web": {
+                    "applicationId": "app-1",
+                },
+            },
+        }
+        cfg = {
+            "project": {"name": "test", "description": "test"},
+            "apps": [
+                {
+                    "name": "web",
+                    "source": "docker",
+                    "dockerImage": "nginx",
+                    "resources": {"memoryLimit": "512M"},
+                },
+            ],
+        }
+
+        client = MagicMock()
+
+        def mock_get(endpoint, params=None):
+            if endpoint == "application.one":
+                return {
+                    "env": "",
+                    "memoryLimit": "536870912",
+                    "mounts": [],
+                    "ports": [],
+                }
+            return {}
+
+        client.get.side_effect = mock_get
+
+        changes = []
+        dokploy._plan_redeploy(client, cfg, state, tmp_path, changes)
+
+        settings_changes = [c for c in changes if c["resource_type"] == "settings"]
+        assert settings_changes == []
+
+    def test_plan_initial_setup_shows_resources(self, tmp_path):
+        """Initial plan lists resource limits and health check as settings creates."""
+        cfg = {
+            "project": {"name": "test", "description": "test"},
+            "apps": [
+                {
+                    "name": "web",
+                    "source": "docker",
+                    "dockerImage": "nginx",
+                    "replicas": 2,
+                    "resources": {"cpuLimit": 0.5},
+                    "healthCheck": {"command": "curl -f http://localhost/health"},
+                },
+            ],
+        }
+        state_file = tmp_path / ".dokploy-state" / "dev.json"
+        client = MagicMock()
+
+        changes = dokploy.compute_plan(client, cfg, state_file, tmp_path)
+
+        settings_changes = [c for c in changes if c["resource_type"] == "settings"]
+        assert len(settings_changes) == 1
+        assert settings_changes[0]["action"] == "create"
+        assert settings_changes[0]["attrs"]["replicas"] == 2
+        assert settings_changes[0]["attrs"]["cpuLimit"] == "500000000"
+        assert settings_changes[0]["attrs"]["healthCheckSwarm"] == {
+            "Test": ["CMD-SHELL", "curl -f http://localhost/health"],
+        }
+
     def test_plan_redeploy_shows_auto_deploy_change(self, tmp_path):
         """_plan_redeploy detects autoDeploy drift."""
         state = {
@@ -4340,6 +4618,77 @@ class TestReconcileAppSettings:
         dokploy.reconcile_app_settings(client, cfg, state)
 
         client.get.assert_not_called()
+        client.post.assert_not_called()
+
+    def test_updates_resources_and_health_check(self):
+        """reconcile_app_settings updates limits and health check when they differ."""
+        client = MagicMock()
+        client.get.return_value = {
+            "memoryLimit": None,
+            "cpuLimit": None,
+            "healthCheckSwarm": None,
+        }
+
+        cfg = {
+            "project": {"name": "test", "description": "test"},
+            "apps": [
+                {
+                    "name": "web",
+                    "source": "docker",
+                    "dockerImage": "nginx",
+                    "resources": {"memoryLimit": "512M", "cpuLimit": 1},
+                    "healthCheck": {"command": "curl -f http://localhost/health", "retries": 3},
+                },
+            ],
+        }
+        state = {
+            "projectId": "proj-1",
+            "apps": {"web": {"applicationId": "app-1"}},
+        }
+
+        dokploy.reconcile_app_settings(client, cfg, state)
+
+        call_args = client.post.call_args
+        assert call_args[0][0] == "application.update"
+        assert call_args[0][1]["memoryLimit"] == "536870912"
+        assert call_args[0][1]["cpuLimit"] == "1000000000"
+        assert call_args[0][1]["healthCheckSwarm"] == {
+            "Test": ["CMD-SHELL", "curl -f http://localhost/health"],
+            "Retries": 3,
+        }
+
+    def test_no_update_when_resources_match(self):
+        """reconcile_app_settings skips update when remote matches resources/healthCheck."""
+        client = MagicMock()
+        client.get.return_value = {
+            "memoryLimit": "536870912",
+            "healthCheckSwarm": {
+                "Test": ["CMD-SHELL", "curl -f http://localhost/health"],
+                "Retries": 3,
+            },
+            "restartPolicySwarm": {"Condition": "on-failure", "MaxAttempts": 3},
+        }
+
+        cfg = {
+            "project": {"name": "test", "description": "test"},
+            "apps": [
+                {
+                    "name": "web",
+                    "source": "docker",
+                    "dockerImage": "nginx",
+                    "resources": {"memoryLimit": "512M"},
+                    "healthCheck": {"command": "curl -f http://localhost/health", "retries": 3},
+                    "restartPolicy": {"condition": "on-failure", "maxAttempts": 3},
+                },
+            ],
+        }
+        state = {
+            "projectId": "proj-1",
+            "apps": {"web": {"applicationId": "app-1"}},
+        }
+
+        dokploy.reconcile_app_settings(client, cfg, state)
+
         client.post.assert_not_called()
 
     def test_skips_when_no_settings_in_config(self):

@@ -401,7 +401,8 @@ def reconcile_app_settings(
     cfg: dict,
     state: dict,
 ) -> None:
-    """Reconcile app settings (command, replicas, autoDeploy) on redeploy."""
+    """Reconcile app settings (command, replicas, autoDeploy, resources,
+    healthCheck, restartPolicy) on redeploy."""
     for app_def in cfg.get("apps", []):
         if is_compose(app_def):
             continue
@@ -424,9 +425,9 @@ def reconcile_app_settings(
             update_payload["command"] = resolved
             changed = True
 
-        for key in ("replicas", "autoDeploy"):
-            if key in app_def and remote.get(key) != app_def[key]:
-                update_payload[key] = app_def[key]
+        for key, value in (settings_payload or {}).items():
+            if key != "applicationId" and remote.get(key) != value:
+                update_payload[key] = value
                 changed = True
 
         if changed:

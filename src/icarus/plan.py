@@ -4,6 +4,7 @@ from icarus.client import load_state, validate_state
 from icarus.env import filter_env, get_env_excludes, resolve_refs
 from icarus.payloads import (
     DATABASE_DEFAULTS,
+    build_app_settings_payload,
     build_mount_payload,
     build_port_payload,
     build_redirect_payload,
@@ -109,10 +110,8 @@ def _plan_initial_setup(cfg: dict, repo_root: Path, changes: list[dict]) -> None
                 )
 
         if not compose:
-            settings_keys = {}
-            for key in ("autoDeploy", "replicas"):
-                if key in app_def:
-                    settings_keys[key] = app_def[key]
+            settings_payload = build_app_settings_payload("", app_def) or {}
+            settings_keys = {k: v for k, v in settings_payload.items() if k != "applicationId"}
             if settings_keys:
                 changes.append(
                     {
@@ -449,10 +448,10 @@ def _plan_redeploy(
             continue
 
         settings_diffs: dict = {}
-        for key in ("command", "replicas", "autoDeploy"):
-            if key not in app_def:
-                continue
-            desired_val = app_def[key]
+        desired_settings = {k: v for k, v in (build_app_settings_payload("", app_def) or {}).items() if k != "applicationId"}
+        if "command" in app_def:
+            desired_settings["command"] = app_def["command"]
+        for key, desired_val in desired_settings.items():
             remote_val = remote.get(key)
             if remote_val != desired_val:
                 settings_diffs[key] = (remote_val, desired_val)

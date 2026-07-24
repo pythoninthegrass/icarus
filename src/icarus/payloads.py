@@ -1,11 +1,65 @@
 from __future__ import annotations
 
+import re
 import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from icarus.client import DokployClient
+
+MEMORY_MULTIPLIERS = {
+    "": 1,
+    "k": 1024,
+    "m": 1024**2,
+    "g": 1024**3,
+    "t": 1024**4,
+}
+
+DURATION_MULTIPLIERS = {
+    "ms": 1_000_000,
+    "s": 1_000_000_000,
+    "m": 60_000_000_000,
+    "h": 3_600_000_000_000,
+}
+
+
+def parse_memory_bytes(value: int | str) -> str:
+    """Convert a memory size (int bytes or '512M'/'1G' string) to a byte-count string.
+
+    Suffixes K/M/G/T (with optional B/iB, any case) are 1024-based, matching Docker.
+    """
+    if isinstance(value, int):
+        return str(value)
+    match = re.fullmatch(r"\s*(\d+(?:\.\d+)?)\s*([a-zA-Z]*)\s*", str(value))
+    if not match:
+        raise ValueError(f"Invalid memory value: {value!r}")
+    number, suffix = match.groups()
+    unit = suffix.lower().removesuffix("ib").removesuffix("b")
+    if unit not in MEMORY_MULTIPLIERS:
+        raise ValueError(f"Invalid memory unit {suffix!r} in {value!r}")
+    return str(int(float(number) * MEMORY_MULTIPLIERS[unit]))
+
+
+def parse_cpu_nanos(value: int | float | str) -> str:
+    """Convert a CPU count (e.g. 0.5, 1, '2') to a nanocore string (1 CPU = 1e9)."""
+    try:
+        cpus = float(value)
+    except (TypeError, ValueError):
+        raise ValueError(f"Invalid CPU value: {value!r}") from None
+    return str(round(cpus * 1_000_000_000))
+
+
+def parse_duration_nanos(value: int | float | str) -> int:
+    """Convert a duration ('30s', '1m', '500ms', or bare seconds) to nanoseconds."""
+    if isinstance(value, (int, float)):
+        return int(value * 1_000_000_000)
+    match = re.fullmatch(r"\s*(\d+(?:\.\d+)?)\s*(ms|s|m|h)?\s*", str(value))
+    if not match:
+        raise ValueError(f"Invalid duration value: {value!r}")
+    number, unit = match.groups()
+    return int(float(number) * DURATION_MULTIPLIERS[unit or "s"])
+
 
 DATABASE_TYPES = {"postgres", "mysql", "mariadb", "mongo", "redis"}
 
@@ -204,7 +258,8 @@ def build_domain_payload(resource_id: str, dom: dict, *, compose: bool = False) 
 
 
 def build_app_settings_payload(app_id: str, app_def: dict) -> dict | None:
-    """Build payload for application.update (autoDeploy, replicas).
+    """Build payload for application.update (autoDeploy, replicas, resources,
+    healthCheck, restartPolicy).
 
     Returns None if no settings need updating.
     """
@@ -212,7 +267,57 @@ def build_app_settings_payload(app_id: str, app_def: dict) -> dict | None:
     for key in ("autoDeploy", "replicas"):
         if key in app_def:
             payload[key] = app_def[key]
+
+    resources = app_def.get("resources", {})
+    for key, parser in (
+        ("memoryLimit", parse_memory_bytes),
+        ("memoryReservation", parse_memory_bytes),
+        ("cpuLimit", parse_cpu_nanos),
+        ("cpuReservation", parse_cpu_nanos),
+    ):
+        if key in resources:
+            payload[key] = parser(resources[key])
+
+    health_check = app_def.get("healthCheck")
+    if health_check:
+        payload["healthCheckSwarm"] = build_health_check_swarm(health_check)
+
+    restart_policy = app_def.get("restartPolicy")
+    if restart_policy:
+        payload["restartPolicySwarm"] = build_restart_policy_swarm(restart_policy)
+
     return payload if len(payload) > 1 else None
+
+
+def build_health_check_swarm(health_check: dict) -> dict:
+    """Translate a healthCheck config block to Dokploy's healthCheckSwarm object.
+
+    A string command runs via the container shell (CMD-SHELL); a list is used
+    as the swarm Test array verbatim. Durations become nanoseconds.
+    """
+    swarm: dict = {}
+    command = health_check.get("command")
+    if command is not None:
+        swarm["Test"] = command if isinstance(command, list) else ["CMD-SHELL", command]
+    for cfg_key, swarm_key in (("interval", "Interval"), ("timeout", "Timeout"), ("startPeriod", "StartPeriod")):
+        if cfg_key in health_check:
+            swarm[swarm_key] = parse_duration_nanos(health_check[cfg_key])
+    if "retries" in health_check:
+        swarm["Retries"] = health_check["retries"]
+    return swarm
+
+
+def build_restart_policy_swarm(restart_policy: dict) -> dict:
+    """Translate a restartPolicy config block to Dokploy's restartPolicySwarm object."""
+    swarm: dict = {}
+    if "condition" in restart_policy:
+        swarm["Condition"] = restart_policy["condition"]
+    for cfg_key, swarm_key in (("delay", "Delay"), ("window", "Window")):
+        if cfg_key in restart_policy:
+            swarm[swarm_key] = parse_duration_nanos(restart_policy[cfg_key])
+    if "maxAttempts" in restart_policy:
+        swarm["MaxAttempts"] = restart_policy["maxAttempts"]
+    return swarm
 
 
 def build_mount_payload(app_id: str, mount: dict) -> dict:

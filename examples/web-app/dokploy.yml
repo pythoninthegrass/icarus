@@ -28,6 +28,11 @@ environments:
           port: 8000
           https: true
           certificateType: letsencrypt
+        # Overrides replace the whole resources block from the base app
+        resources:
+          memoryLimit: 1G
+          memoryReservation: 512M
+          cpuLimit: 2
       flower:
         domain:
           host: flower.example.com
@@ -49,10 +54,32 @@ apps:
   - name: redis
     source: docker
     dockerImage: redis:7-alpine
+    resources:
+      memoryLimit: 256M
+    healthCheck:
+      command: redis-cli ping
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    restartPolicy:
+      condition: on-failure
+      delay: 5s
+      maxAttempts: 3
+      window: 120s
 
   - name: web
     source: github
     autoDeploy: true
+    resources:
+      memoryLimit: 512M
+      memoryReservation: 256M
+      cpuLimit: 1
+    healthCheck:
+      command: curl -f http://localhost:8000/health
+      interval: 30s
+      timeout: 10s
+      startPeriod: 60s
+      retries: 3
     redirects:
       - regex: "^/blog$"
         replacement: "https://blog.example.com"

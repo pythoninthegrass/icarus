@@ -46,7 +46,7 @@ Per-environment overrides merged into the base config before any command runs.
 
 ### Overridable App Properties
 
-All per-app fields can be overridden per environment: `command`, `env`, `dockerImage`, `domain`, `buildType`, `dockerfile`, `dockerContextPath`, `dockerBuildStage`, `publishDirectory`, `autoDeploy`, `replicas`, `buildPath`, `triggerType`, `watchPaths`, `create_env_file`, `ports`, `schedules`.
+All per-app fields can be overridden per environment: `command`, `env`, `dockerImage`, `domain`, `buildType`, `dockerfile`, `dockerContextPath`, `dockerBuildStage`, `publishDirectory`, `autoDeploy`, `replicas`, `resources`, `healthCheck`, `restartPolicy`, `buildPath`, `triggerType`, `watchPaths`, `create_env_file`, `ports`, `schedules`.
 
 ### Merging Semantics
 
@@ -72,6 +72,9 @@ All per-app fields can be overridden per environment: `command`, `env`, `dockerI
 | `apps[].isStaticSpa` | no | Single Page Application mode (for `buildType: static`) |
 | `apps[].autoDeploy` | no | Enable auto-deploy on push (`true`/`false`) |
 | `apps[].replicas` | no | Number of app replicas (integer, minimum 1) |
+| `apps[].resources` | no | Resource limits/reservations object (see below) |
+| `apps[].healthCheck` | no | Health check object applied to the swarm service (see below) |
+| `apps[].restartPolicy` | no | Restart policy object applied to the swarm service (see below) |
 | `apps[].buildPath` | no | Build path for GitHub provider (default: `/`) |
 | `apps[].triggerType` | no | GitHub trigger type: `push` (default) or `manual` |
 | `apps[].watchPaths` | no | File paths to watch for auto-deploy triggers (list of strings) |
@@ -122,6 +125,77 @@ ic --env prod run-schedule <app> <schedule-name>
 ```
 
 `app` is optional and auto-selects when only one app is configured.
+
+### Resources Object
+
+| Key                           | Required | Description                                                                                           |
+| ----------------------------- | -------- | ----------------------------------------------------------------------------------------------------- |
+| `resources.memoryLimit`       | no       | Memory hard limit: integer bytes or string with 1024-based `K`/`M`/`G`/`T` suffix (e.g. `512M`, `1G`) |
+| `resources.memoryReservation` | no       | Memory soft reservation, same format as `memoryLimit`                                                 |
+| `resources.cpuLimit`          | no       | CPU hard limit in CPUs (e.g. `0.5`, `1`, `2`)                                                         |
+| `resources.cpuReservation`    | no       | CPU soft reservation in CPUs                                                                          |
+
+Limits are converted to the byte-count and nanocore strings the Dokploy API expects and applied via `application.update`. On redeploy, values are diffed against the remote application and only sent when changed.
+
+```yaml
+apps:
+  - name: web
+    source: docker
+    dockerImage: nginx:alpine
+    resources:
+      memoryLimit: 512M
+      memoryReservation: 256M
+      cpuLimit: 1
+      cpuReservation: 0.5
+```
+
+### Health Check Object
+
+| Key                       | Required | Description                                                                                                      |
+| ------------------------- | -------- | ---------------------------------------------------------------------------------------------------------------- |
+| `healthCheck.command`     | no       | Check command: a string runs via the container shell (`CMD-SHELL`), a list is used as the raw swarm `Test` array |
+| `healthCheck.interval`    | no       | Time between checks (e.g. `30s`, `1m`; bare numbers are seconds)                                                 |
+| `healthCheck.timeout`     | no       | Time a single check may run before it counts as failed (e.g. `10s`)                                              |
+| `healthCheck.startPeriod` | no       | Grace period before failures count against `retries` (e.g. `60s`)                                                |
+| `healthCheck.retries`     | no       | Consecutive failures needed to mark the container unhealthy                                                      |
+
+Durations accept `ms`, `s`, `m`, and `h` suffixes and are converted to the nanosecond values Docker swarm expects. The block maps to Dokploy's `healthCheckSwarm` field on `application.update`.
+
+```yaml
+apps:
+  - name: web
+    source: docker
+    dockerImage: nginx:alpine
+    healthCheck:
+      command: curl -f http://localhost/health
+      interval: 30s
+      timeout: 10s
+      startPeriod: 60s
+      retries: 3
+```
+
+### Restart Policy Object
+
+| Key                         | Required | Description                                                          |
+| --------------------------- | -------- | -------------------------------------------------------------------- |
+| `restartPolicy.condition`   | no       | When to restart: `none`, `on-failure`, or `any`                      |
+| `restartPolicy.delay`       | no       | Delay between restart attempts (e.g. `5s`; bare numbers are seconds) |
+| `restartPolicy.maxAttempts` | no       | Maximum restart attempts within `window` (0 = unlimited)             |
+| `restartPolicy.window`      | no       | Window used to evaluate `maxAttempts` (e.g. `120s`)                  |
+
+Maps to Dokploy's `restartPolicySwarm` field on `application.update`, with durations converted to nanoseconds.
+
+```yaml
+apps:
+  - name: web
+    source: docker
+    dockerImage: nginx:alpine
+    restartPolicy:
+      condition: on-failure
+      delay: 5s
+      maxAttempts: 3
+      window: 120s
+```
 
 ### Domain Object
 

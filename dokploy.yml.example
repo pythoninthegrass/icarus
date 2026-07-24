@@ -82,6 +82,25 @@ apps:
     #   - "src/**"
     #   - Dockerfile
     # create_env_file: false      # Write env vars to .env in container workdir
+    # Container resource limits (applied via Docker swarm)
+    # resources:
+    #   memoryLimit: 512M          # Bytes, or K/M/G/T suffix (1024-based)
+    #   memoryReservation: 256M    # Soft reservation
+    #   cpuLimit: 1                # CPUs (e.g. 0.5, 1, 2)
+    #   cpuReservation: 0.5
+    # Swarm health check for the app container
+    # healthCheck:
+    #   command: curl -f http://localhost/health  # String runs via CMD-SHELL; list = raw Test array
+    #   interval: 30s              # ms/s/m/h suffixes; bare numbers are seconds
+    #   timeout: 10s
+    #   startPeriod: 60s           # Grace period before failures count
+    #   retries: 3
+    # Swarm restart policy for the app container
+    # restartPolicy:
+    #   condition: on-failure      # none | on-failure | any
+    #   delay: 5s
+    #   maxAttempts: 3             # 0 = unlimited
+    #   window: 120s
 
   - name: worker
     source: github
