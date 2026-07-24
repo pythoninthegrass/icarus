@@ -9,6 +9,8 @@ from icarus.commands import (
     cmd_destroy,
     cmd_env,
     cmd_exec,
+    cmd_git_provider_list,
+    cmd_git_provider_remove,
     cmd_import,
     cmd_logs,
     cmd_run_schedule,

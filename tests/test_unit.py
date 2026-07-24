@@ -7389,3 +7389,73 @@ class TestCmdBackup:
             dokploy.cmd_backup(client, state_file, "nonexistent", volume="pg-data")
         assert "Unknown resource" in capsys.readouterr().out
         client.post.assert_not_called()
+
+
+class TestCmdGitProviderList:
+    def test_prints_each_provider(self, capsys):
+        client = MagicMock()
+        client.get.return_value = [
+            {"gitProviderId": "gp-1", "name": "org/repo", "providerType": "github"},
+            {"gitProviderId": "gp-2", "name": "group/proj", "providerType": "gitlab"},
+        ]
+
+        dokploy.cmd_git_provider_list(client)
+
+        client.get.assert_called_once_with("gitProvider.getAll")
+        out = capsys.readouterr().out
+        assert "gp-1" in out
+        assert "github" in out
+        assert "org/repo" in out
+        assert "gp-2" in out
+        assert "gitlab" in out
+
+    def test_empty_list_prints_message(self, capsys):
+        client = MagicMock()
+        client.get.return_value = []
+
+        dokploy.cmd_git_provider_list(client)
+
+        client.get.assert_called_once_with("gitProvider.getAll")
+        assert "No git providers configured" in capsys.readouterr().out
+
+
+class TestCmdGitProviderRemove:
+    def test_removes_by_id(self, capsys):
+        client = MagicMock()
+        client.post.return_value = {}
+
+        dokploy.cmd_git_provider_remove(client, "gp-1")
+
+        client.post.assert_called_once_with("gitProvider.remove", {"gitProviderId": "gp-1"})
+        assert "Removed" in capsys.readouterr().out
+
+
+class TestGitProviderArgparse:
+    def _build_parser(self):
+        parser = argparse.ArgumentParser()
+        parser.add_argument("--env", default=None)
+        sub = parser.add_subparsers(dest="command")
+        git_provider_parser = sub.add_parser("git-provider")
+        git_provider_sub = git_provider_parser.add_subparsers(dest="git_provider_command")
+        git_provider_sub.add_parser("list")
+        remove_parser = git_provider_sub.add_parser("remove")
+        remove_parser.add_argument("provider_id")
+        return parser
+
+    def test_list_subcommand_parses(self):
+        parser = self._build_parser()
+        parsed = parser.parse_args(["git-provider", "list"])
+        assert parsed.command == "git-provider"
+        assert parsed.git_provider_command == "list"
+
+    def test_remove_subcommand_parses_id(self):
+        parser = self._build_parser()
+        parsed = parser.parse_args(["git-provider", "remove", "gp-1"])
+        assert parsed.command == "git-provider"
+        assert parsed.git_provider_command == "remove"
+        assert parsed.provider_id == "gp-1"
+
+    def test_remove_without_id_rejected(self):
+        parser = self._build_parser()
+        with pytest.raises(SystemExit):
+            parser.parse_args(["git-provider", "remove"])

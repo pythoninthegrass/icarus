@@ -23,6 +23,8 @@ from icarus.commands import (
     cmd_destroy,
     cmd_env,
     cmd_exec,
+    cmd_git_provider_list,
+    cmd_git_provider_remove,
     cmd_import,
     cmd_logs,
     cmd_run_schedule,
@@ -89,6 +91,12 @@ def main() -> None:
     backup_parser.add_argument("--list", action="store_true", dest="list_files", help="List backup files")
     backup_parser.add_argument("--volume", default=None, help="Run the named volume backup instead")
 
+    git_provider_parser = sub.add_parser("git-provider", help="Inspect/remove configured git providers (account-level)")
+    git_provider_sub = git_provider_parser.add_subparsers(dest="git_provider_command")
+    git_provider_sub.add_parser("list", help="List all configured git providers")
+    git_provider_remove_parser = git_provider_sub.add_parser("remove", help="Remove a git provider")
+    git_provider_remove_parser.add_argument("provider_id", help="Git provider ID to remove")
+
     args = parser.parse_args()
     if args.command is None:
         parser.print_help()
@@ -117,6 +125,15 @@ def main() -> None:
             cmd_backup(client, state_file, args.resource, args.prefix, args.list_files, args.volume)
         else:
             cmd_run_schedule(client, state_file, args.app, args.schedule)
+        return
+
+    if args.command == "git-provider":
+        if args.git_provider_command == "list":
+            cmd_git_provider_list(client)
+        elif args.git_provider_command == "remove":
+            cmd_git_provider_remove(client, args.provider_id)
+        else:
+            git_provider_parser.print_help()
         return
 
     repo_root = find_repo_root()

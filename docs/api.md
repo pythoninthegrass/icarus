@@ -22,6 +22,16 @@ Requires the `x-api-key` header.
   repo objects. Each repo has `owner.login` — used to auto-select the correct provider
   when multiple GitHub providers are configured.
 
+- **`gitProvider.getAll`**: GET, no params. Returns all configured git providers across
+  every type (GitHub, GitLab, Bitbucket, generic Git, etc.), unlike
+  `github.githubProviders`/`github.getGithubRepositories` which are GitHub-specific.
+  Exposed via `ic git-provider list`.
+
+- **`gitProvider.remove`**: POST with `{"gitProviderId": "..."}`. Disconnects a git
+  provider account-wide (any type). Exposed via `ic git-provider remove <id>`. This is
+  independent of `resolve_github_provider`/`saveGithubProvider`, which only resolve
+  which GitHub provider to use for a given app's repo owner during `setup`.
+
 - **`project.remove`** (not `project.delete`) is the correct endpoint for project deletion.
 
 - **`application.saveBuildType`** is a separate endpoint from `application.update` — build type configuration cannot be set via the general update endpoint.

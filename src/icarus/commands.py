@@ -929,6 +929,26 @@ def cmd_backup(
     print("  Triggered.")
 
 
+def cmd_git_provider_list(client: DokployClient) -> None:
+    """List all configured git providers via gitProvider.getAll."""
+    providers: list = client.get("gitProvider.getAll")  # type: ignore[assignment]
+    if not providers:
+        print("No git providers configured.")
+        return
+    for p in providers:
+        provider_id = p.get("gitProviderId", "?")
+        name = p.get("name", "?")
+        provider_type = p.get("providerType", "?")
+        print(f"  {provider_id:36s}  {provider_type:10s}  {name}")
+
+
+def cmd_git_provider_remove(client: DokployClient, provider_id: str) -> None:
+    """Remove a git provider via gitProvider.remove."""
+    print(f"Removing git provider {provider_id}...")
+    client.post("gitProvider.remove", {"gitProviderId": provider_id})
+    print("  Removed.")
+
+
 def cmd_logs(client: DokployClient, state_file: Path, app: str | None, follow: bool, tail: int, exited: bool) -> None:
     """Fetch container logs via docker-py over SSH."""
     state = load_state(state_file)
