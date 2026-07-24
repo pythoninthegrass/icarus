@@ -1,15 +1,19 @@
 ---
 id: TASK-029.04
 title: Document out-of-scope API groups as non-goals
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-07-24 15:53'
+updated_date: '2026-07-24 17:22'
 labels: []
 dependencies: []
 references:
   - /Users/lance/.claude/plans/an-official-dokploy-cli-sunny-steele.md
+modified_files:
+  - docs/api.md
 parent_task_id: TASK-029
-ordinal: 17000
+priority: medium
+ordinal: 4000
 ---
 
 ## Description
@@ -30,7 +34,13 @@ Record the deliberate boundary so the gap vs the official CLI is intentional, no
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 docs/api.md has a Non-goals section with a rationale table for each out-of-scope group
-- [ ] #2 Future candidates (notifications, lifecycle verbs) noted as such
-- [ ] #3 markdownlint passes on docs/api.md
+- [x] #1 docs/api.md has a Non-goals section with a rationale table for each out-of-scope group
+- [x] #2 Future candidates (notifications, lifecycle verbs) noted as such
+- [x] #3 markdownlint passes on docs/api.md
 <!-- AC:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Added a "Non-goals" section to docs/api.md with a rationale table covering all out-of-scope API groups (notification, settings, user/organization/sso/stripe/admin, ai, cluster/swarm, patch, docker, preview-deployment/rollback, and lifecycle verbs). notification and lifecycle verbs are called out as future candidates; the rest are documented as deliberately out of scope. markdownlint passes clean.
+<!-- SECTION:FINAL_SUMMARY:END -->

@@ -54,6 +54,24 @@ Requires the `x-api-key` header.
 
 - **`certificates.remove`**: POST with `{"certificateId": "..."}`. `reconcile_certificates` now deletes certificates that were previously created by icarus (tracked in state) but removed from `dokploy.yml`. Deletion is scoped to icarus-tracked certificates only — `certificates.all` returns every certificate in the organization, not just icarus's, so diffing is done against `state["certificates"]`, not the full remote list.
 
+## Non-goals
+
+icarus is a declarative deploy tool (`dokploy.yml` + reconcile), not a 1:1 wrapper around the Dokploy API. The official `@dokploy/cli` covers all 449 endpoints across 45 groups; icarus deliberately does not wrap the panel-admin and imperative groups below. This boundary is intentional, not a coverage gap.
+
+| Group                                                   | Endpoints        | Why out of scope                                                       |
+| ------------------------------------------------------- | ---------------- | ---------------------------------------------------------------------- |
+| notification                                             | 38               | Panel admin. Future candidate: declarative notify-on-deploy.           |
+| settings                                                | 49               | Server/Traefik admin; `clean` already covers the prune subset via SSH.  |
+| user, organization, sso, stripe, admin                  | 18, 10, 10, 7, 1 | Account/billing/tenant admin - not deployment.                         |
+| ai                                                      | 9                | Dokploy AI features; unrelated to config-driven deploy.                 |
+| cluster, swarm                                          | 4, 3             | Node/infra management.                                                 |
+| patch                                                   | 12               | Server-side file patching; niche.                                       |
+| docker                                                  | 7                | Redundant - icarus reads containers directly over SSH (`ssh.py`).      |
+| preview-deployment, rollback                            | 4, 2             | Imperative deploy verbs - deferred with lifecycle verbs.               |
+| lifecycle verbs (start/stop/reload/rebuild/cancel/kill) | n/a              | Imperative; icarus stays declarative this round.                       |
+
+Notification and lifecycle verbs are noted above as future candidates should icarus's scope expand; the rest are panel-admin or redundant with icarus's existing SSH-based approach and are not expected to be revisited.
+
 ## Known Server-Side Issues
 
 - **Stale Traefik configs after project destroy**: `project.remove` deletes the

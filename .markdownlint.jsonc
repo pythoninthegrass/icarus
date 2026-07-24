@@ -16,5 +16,7 @@
   // Emphasis as heading (e.g., table of contents)
   "MD036": false,
   // Inline HTML
-  "MD033": false
+  "MD033": false,
+  // Table column style (false positives on em dash width)
+  "MD060": false
 }

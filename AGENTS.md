@@ -98,9 +98,11 @@ Tools managed by mise (prek, python, uv, yamllint, etc.) must be invoked via `mi
 mise exec -- yamllint -c .yamllint .
 ```
 
-### Markdown Tables
+### Markdown Style
 
-markdownlint enforces aligned table columns (MD060). When writing markdown tables, generate them programmatically to guarantee pipe alignment:
+- Do NOT use em dashes (`—`) in markdown files; use a hyphen (`-`) or rephrase. Em dashes render wider than their character count in many fonts/tools, breaking table column alignment even when the underlying text is character-aligned.
+- Do NOT hard-wrap prose across multiple source lines (e.g. breaking one sentence into 3 lines). Write each paragraph as a single source line; `MD013` (line length) is disabled in `.markdownlint.jsonc`, so there's no need to wrap.
+- markdownlint enforces aligned table columns (MD060). When writing markdown tables, generate them programmatically to guarantee pipe alignment:
 
 ```python
 rows = [["Header1", "Header2"], ["cell", "cell"]]
