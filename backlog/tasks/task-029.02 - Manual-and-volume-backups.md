@@ -1,15 +1,17 @@
 ---
 id: TASK-029.02
 title: Manual and volume backups
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-07-24 15:53'
+updated_date: '2026-07-24 17:33'
 labels: []
 dependencies: []
 references:
   - /Users/lance/.claude/plans/an-official-dokploy-cli-sunny-steele.md
 parent_task_id: TASK-029
-ordinal: 15000
+priority: high
+ordinal: 2000
 ---
 
 ## Description
@@ -26,9 +28,19 @@ Files: src/icarus/payloads.py, src/icarus/reconcile.py, src/icarus/commands.py, 
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 ic backup <db> triggers the correct manualBackup* for the DB type using stored backupId
-- [ ] #2 ic backup <db> --list lists backup files via backup.listBackupFiles
-- [ ] #3 volumeBackups: config block validates against schemas/dokploy.schema.json and is reconciled (create/update/delete by prefix)
-- [ ] #4 ic backup <resource> --volume <name> triggers volumeBackups.runManually
-- [ ] #5 plan output includes volume-backup diffs; tests added to existing tests/ files; docs and dokploy.yml.example updated
+- [x] #1 ic backup <db> triggers the correct manualBackup* for the DB type using stored backupId
+- [x] #2 ic backup <db> --list lists backup files via backup.listBackupFiles
+- [x] #3 volumeBackups: config block validates against schemas/dokploy.schema.json and is reconciled (create/update/delete by prefix)
+- [x] #4 ic backup <resource> --volume <name> triggers volumeBackups.runManually
+- [x] #5 plan output includes volume-backup diffs; tests added to existing tests/ files; docs and dokploy.yml.example updated
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Implemented: cmd_backup (manual DB backup, --list, --volume) wired into cli.py; build_volume_backup_payload in payloads.py; reconcile_volume_backups in reconcile.py (for both apps and database entries); volume_backup diffs added to plan.py (_plan_initial_setup and _plan_redeploy); schema/docs/example updated. Also fixed a pre-existing bug: reconcile_database_backups posted to the nonexistent 'backup.delete' endpoint instead of 'backup.remove'.
+
+Deviation from AC #3 wording: volumeBackups are reconciled keyed by `name` (a required field on volume_backup_entry), not `prefix` — prefix is only used for backup-file naming/search, not identity, so name is the correct dedup/diff key. All other behavior matches spec.
+
+Tests: 480 passed (402 in test_unit.py + others), 0 failed. ruff format clean. dokploy.yml.example validates against load_config/validate_config.
+<!-- SECTION:NOTES:END -->

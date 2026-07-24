@@ -54,6 +54,18 @@ Requires the `x-api-key` header.
 
 - **`certificates.remove`**: POST with `{"certificateId": "..."}`. `reconcile_certificates` now deletes certificates that were previously created by icarus (tracked in state) but removed from `dokploy.yml`. Deletion is scoped to icarus-tracked certificates only — `certificates.all` returns every certificate in the organization, not just icarus's, so diffing is done against `state["certificates"]`, not the full remote list.
 
+- **`backup.manualBackupPostgres`/`MySql`/`Mariadb`/`Mongo`**: POST with `{"backupId": "..."}`. Triggers an on-demand run of an existing scheduled database backup outside its cron expression. There is no manual-backup endpoint for Redis. Exposed via `ic backup <db-name>`.
+
+- **`backup.listBackupFiles`**: GET with `?destinationId=<id>&search=<prefix>`. Lists backup files already stored at a destination matching the given prefix. Exposed via `ic backup <db-name> --list`.
+
+- **`backup.remove`** (not `backup.delete`) is the correct endpoint for deleting a database backup schedule. Takes `{"backupId": "..."}`.
+
+- **`volumeBackups.create`/`.update`**: Requires `name`, `volumeName`, `prefix`, `cronExpression`, `destinationId`, `serviceType` (`application`, `compose`, or a database type), and the matching service id field (`applicationId`, `composeId`, `postgresId`, `mysqlId`, `mariadbId`, `mongoId`, `redisId`). Optional: `keepLatestCount`, `enabled`. Unlike database `backups`, `volumeBackups` back up a named Docker volume directly and work for any service type, including Redis and compose apps.
+
+- **`volumeBackups.list`**: GET with `?id=<serviceId>&volumeBackupType=<serviceType>`. Returns the volume backup schedules for a given app/compose/database.
+
+- **`volumeBackups.delete`/`.runManually`**: POST with `{"volumeBackupId": "..."}`. `runManually` triggers an on-demand run outside the cron schedule, exposed via `ic backup <resource> --volume <name>`.
+
 ## Non-goals
 
 icarus is a declarative deploy tool (`dokploy.yml` + reconcile), not a 1:1 wrapper around the Dokploy API. The official `@dokploy/cli` covers all 449 endpoints across 45 groups; icarus deliberately does not wrap the panel-admin and imperative groups below. This boundary is intentional, not a coverage gap.

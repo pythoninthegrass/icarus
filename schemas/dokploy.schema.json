@@ -417,6 +417,13 @@
             },
             "description": "URL redirects (regex-based 301/302)"
           },
+          "volumeBackups": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/volume_backup_entry"
+            },
+            "description": "Scheduled volume backups for this app or compose service"
+          },
           "server": {
             "type": "string",
             "description": "Target server name (from Dokploy Settings → Servers). Resolves to serverId at setup time."
@@ -810,6 +817,49 @@
         }
       }
     },
+    "volume_backup_entry": {
+      "type": "object",
+      "required": [
+        "name",
+        "volumeName",
+        "prefix",
+        "cronExpression",
+        "destination"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Unique name for this volume backup schedule"
+        },
+        "volumeName": {
+          "type": "string",
+          "description": "Docker volume name to back up"
+        },
+        "prefix": {
+          "type": "string",
+          "description": "Prefix for backup files in the destination bucket"
+        },
+        "cronExpression": {
+          "type": "string",
+          "description": "5-field cron expression for backup frequency"
+        },
+        "destination": {
+          "type": "string",
+          "description": "Destination name (from destinations section)"
+        },
+        "enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Whether the volume backup schedule is active (default: true)"
+        },
+        "keepLatestCount": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Number of latest backups to retain"
+        }
+      }
+    },
     "database_entry": {
       "type": "object",
       "required": [
@@ -864,6 +914,13 @@
             "$ref": "#/$defs/backup_entry"
           },
           "description": "Backup schedules for this database"
+        },
+        "volumeBackups": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/volume_backup_entry"
+          },
+          "description": "Scheduled volume backups for this database"
         }
       },
       "allOf": [

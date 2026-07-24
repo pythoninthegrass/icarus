@@ -5,6 +5,7 @@ Usage:
     ic --env <environment> <setup|env|apply|status|clean|destroy>
     ic --env <environment> logs [app] [-f] [-n TAIL] [--exited]
     ic --env <environment> exec [app] [--exited] [-- command...]
+    ic --env <environment> backup <resource> [--prefix NAME] [--list] [--volume NAME]
 
 Environment can also be set via DOKPLOY_ENV env var.
 SSH commands (logs, exec) require DOKPLOY_SSH_HOST in .env.
@@ -16,6 +17,7 @@ import argparse
 from icarus.client import DokployClient
 from icarus.commands import (
     cmd_apply,
+    cmd_backup,
     cmd_check,
     cmd_clean,
     cmd_destroy,
@@ -81,6 +83,12 @@ def main() -> None:
     run_schedule_parser.add_argument("app", nargs="?", default=None, help="App name (auto-selects if only one)")
     run_schedule_parser.add_argument("schedule", help="Schedule name (as defined in dokploy.yml)")
 
+    backup_parser = sub.add_parser("backup", help="Trigger a manual database backup or volume backup")
+    backup_parser.add_argument("resource", help="Database, app, or compose name (as defined in dokploy.yml)")
+    backup_parser.add_argument("--prefix", default=None, help="Backup schedule prefix (auto-selects if only one)")
+    backup_parser.add_argument("--list", action="store_true", dest="list_files", help="List backup files")
+    backup_parser.add_argument("--volume", default=None, help="Run the named volume backup instead")
+
     args = parser.parse_args()
     if args.command is None:
         parser.print_help()
@@ -96,7 +104,7 @@ def main() -> None:
     base_url: str = config("DOKPLOY_URL", default="https://dokploy.example.com")  # type: ignore[assignment]
     client = DokployClient(base_url, api_key)
 
-    if args.command in ("logs", "exec", "run-schedule"):
+    if args.command in ("logs", "exec", "run-schedule", "backup"):
         state_file = get_state_file(Path.cwd(), env_name)
         if args.command == "logs":
             cmd_logs(client, state_file, args.app, args.follow, args.tail, args.exited)
@@ -105,6 +113,8 @@ def main() -> None:
             if exec_cmd and exec_cmd[0] == "--":
                 exec_cmd = exec_cmd[1:]
             cmd_exec(client, state_file, args.app, args.exited, exec_cmd or None)
+        elif args.command == "backup":
+            cmd_backup(client, state_file, args.resource, args.prefix, args.list_files, args.volume)
         else:
             cmd_run_schedule(client, state_file, args.app, args.schedule)
         return

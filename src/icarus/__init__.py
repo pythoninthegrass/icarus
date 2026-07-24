@@ -1,7 +1,9 @@
 from icarus.cli import main
 from icarus.client import DokployClient, load_state, save_state, validate_state
 from icarus.commands import (
+    MANUAL_BACKUP_ENDPOINTS,
     cmd_apply,
+    cmd_backup,
     cmd_check,
     cmd_clean,
     cmd_destroy,
@@ -47,6 +49,7 @@ from icarus.payloads import (
     build_registry_update_payload,
     build_schedule_payload,
     build_security_payload,
+    build_volume_backup_payload,
     database_endpoint,
     database_id_key,
     is_compose,
@@ -82,6 +85,7 @@ from icarus.reconcile import (
     reconcile_registries,
     reconcile_schedules,
     reconcile_security,
+    reconcile_volume_backups,
 )
 from icarus.schema import (
     get_state_file,

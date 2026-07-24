@@ -355,6 +355,30 @@ def build_backup_create_payload(
     return payload
 
 
+def build_volume_backup_payload(
+    vb_def: dict,
+    *,
+    destination_id: str,
+    service_type: str,
+    service_id_key: str,
+    service_id: str,
+) -> dict:
+    """Build the API payload for creating/updating a volume backup schedule."""
+    payload: dict = {
+        "name": vb_def["name"],
+        "volumeName": vb_def["volumeName"],
+        "prefix": vb_def["prefix"],
+        "cronExpression": vb_def["cronExpression"],
+        "enabled": vb_def.get("enabled", True),
+        "destinationId": destination_id,
+        "serviceType": service_type,
+        service_id_key: service_id,
+    }
+    if "keepLatestCount" in vb_def:
+        payload["keepLatestCount"] = vb_def["keepLatestCount"]
+    return payload
+
+
 def build_schedule_payload(app_id: str, sched: dict) -> dict:
     """Build payload for schedule.create."""
     payload = {

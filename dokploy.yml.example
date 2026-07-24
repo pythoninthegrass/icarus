@@ -57,6 +57,14 @@ apps:
         targetPort: 6379
         # protocol: tcp           # tcp (default) | udp
         # publishMode: ingress    # ingress (default) | host
+    # Scheduled Docker volume backups (any service type, unlike database `backups`)
+    # volumeBackups:
+    #   - name: redis-data
+    #     volumeName: redis_data
+    #     prefix: redis-data
+    #     cronExpression: "0 4 * * *"
+    #     destination: s3-backups
+    #     keepLatestCount: 7
 
   - name: web
     source: github
@@ -111,6 +119,15 @@ certificates:
     keyFile: certs/wildcard.key      # path relative to repo root
     autoRenew: false                 # optional
 
+# S3-compatible destinations for database/volume backups
+# destinations:
+#   - name: s3-backups
+#     accessKey: AKIAIOSFODNN7EXAMPLE
+#     secretAccessKey: wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
+#     bucket: my-dokploy-backups
+#     region: us-east-1
+#     endpoint: https://s3.amazonaws.com
+
 # Database resources (created and deployed during setup)
 # Supported types: postgres, mysql, mariadb, mongo, redis
 database:
@@ -121,6 +138,19 @@ database:
     databaseUser: myuser
     databasePassword: changeme
     # description: "Primary application database"
+    # Scheduled backups (postgres, mysql, mariadb, mongo only — not redis)
+    # backups:
+    #   - schedule: "0 0 * * *"
+    #     prefix: daily
+    #     destination: s3-backups
+    #     keepLatestCount: 7
+    # Scheduled Docker volume backups (any database type, including redis)
+    # volumeBackups:
+    #   - name: pg-data
+    #     volumeName: app-db_postgres_data
+    #     prefix: pg-data
+    #     cronExpression: "0 3 * * *"
+    #     destination: s3-backups
 
   # - name: app-cache
   #   type: redis

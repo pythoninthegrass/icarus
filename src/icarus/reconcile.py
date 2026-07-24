@@ -18,6 +18,7 @@ from icarus.payloads import (
     build_registry_update_payload,
     build_schedule_payload,
     build_security_payload,
+    build_volume_backup_payload,
     database_endpoint,
     database_id_key,
     is_compose,
@@ -711,7 +712,7 @@ def reconcile_database_backups(
                 if needs_update:
                     update_payload = {**payload, "backupId": backup_id}
                     client.post("backup.update", update_payload)
-                result_state[prefix] = {"backupId": backup_id}
+                result_state[prefix] = {"backupId": backup_id, "destinationId": destination_id}
             else:
                 payload = build_backup_create_payload(
                     backup_def,
@@ -721,13 +722,103 @@ def reconcile_database_backups(
                     destination_id=destination_id,
                 )
                 resp = client.post("backup.create", payload)
-                result_state[prefix] = {"backupId": resp["backupId"]}
+                result_state[prefix] = {"backupId": resp["backupId"], "destinationId": destination_id}
 
         for prefix, ex in existing_by_prefix.items():
             if prefix not in desired_by_prefix:
-                client.post("backup.delete", {"backupId": ex["backupId"]})
+                client.post("backup.remove", {"backupId": ex["backupId"]})
 
         state["database"][name]["backups"] = result_state
+        changed = True
+
+    if changed:
+        save_state(state, state_file)
+
+
+def _reconcile_volume_backups_for_service(
+    client: DokployClient,
+    cfg_entries: list,
+    state: dict,
+    service_type: str,
+    service_id_key: str,
+    service_id: str,
+) -> dict:
+    """Reconcile volume backups for a single app/database against desired config, by name."""
+    existing = client.get("volumeBackups.list", {"id": service_id, "volumeBackupType": service_type})
+    if not isinstance(existing, list):
+        existing = []
+
+    desired_by_name = {vb["name"]: vb for vb in cfg_entries}
+    existing_by_name = {vb["name"]: vb for vb in existing}
+
+    result_state = {}
+    for vb_name, vb_def in desired_by_name.items():
+        destination_id = state.get("destinations", {}).get(vb_def["destination"], {}).get("destinationId")
+        payload = build_volume_backup_payload(
+            vb_def,
+            destination_id=destination_id,
+            service_type=service_type,
+            service_id_key=service_id_key,
+            service_id=service_id,
+        )
+        if vb_name in existing_by_name:
+            ex = existing_by_name[vb_name]
+            volume_backup_id = ex["volumeBackupId"]
+            needs_update = any(
+                payload.get(k) != ex.get(k)
+                for k in ("volumeName", "prefix", "cronExpression", "enabled", "keepLatestCount", "destinationId")
+            )
+            if needs_update:
+                update_payload = {**payload, "volumeBackupId": volume_backup_id}
+                client.post("volumeBackups.update", update_payload)
+            result_state[vb_name] = {"volumeBackupId": volume_backup_id}
+        else:
+            resp = client.post("volumeBackups.create", payload)
+            result_state[vb_name] = {"volumeBackupId": resp["volumeBackupId"]}
+
+    for vb_name, ex in existing_by_name.items():
+        if vb_name not in desired_by_name:
+            client.post("volumeBackups.delete", {"volumeBackupId": ex["volumeBackupId"]})
+
+    return result_state
+
+
+def reconcile_volume_backups(
+    client: DokployClient,
+    cfg: dict,
+    state: dict,
+    state_file: Path,
+) -> None:
+    """Reconcile volumeBackups for all apps and databases."""
+    changed = False
+
+    for app_def in cfg.get("apps", []):
+        vb_cfg = app_def.get("volumeBackups")
+        name = app_def["name"]
+        app_info = state["apps"].get(name, {})
+        if vb_cfg is None and "volumeBackups" not in app_info:
+            continue
+        compose = is_compose(app_def)
+        service_type = "compose" if compose else "application"
+        service_id_key = "composeId" if compose else "applicationId"
+        service_id = app_info[service_id_key]
+        state["apps"][name]["volumeBackups"] = _reconcile_volume_backups_for_service(
+            client, vb_cfg or [], state, service_type, service_id_key, service_id
+        )
+        changed = True
+
+    for db_def in cfg.get("database", []):
+        vb_cfg = db_def.get("volumeBackups")
+        name = db_def["name"]
+        db_info = state.get("database", {}).get(name, {})
+        if vb_cfg is None and "volumeBackups" not in db_info:
+            continue
+        db_type = db_def["type"]
+        service_id_key = database_id_key(db_type)
+        service_id = db_info[service_id_key]
+        state["database"][name]["volumeBackups"] = _reconcile_volume_backups_for_service(
+            client, vb_cfg or [], state, db_type, service_id_key, service_id
+        )
         changed = True
 
     if changed:

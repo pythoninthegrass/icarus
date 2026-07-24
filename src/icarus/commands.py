@@ -56,6 +56,7 @@ from icarus.reconcile import (
     reconcile_databases,
     reconcile_destinations,
     reconcile_registries,
+    reconcile_volume_backups,
 )
 from icarus.ssh import (
     cleanup_stale_routes,
@@ -565,7 +566,10 @@ def cmd_setup(client: DokployClient, cfg: dict, state_file: Path, repo_root: Pat
             backup_resp = client.post("backup.create", backup_payload)
             if "backups" not in state["database"][name]:
                 state["database"][name]["backups"] = {}
-            state["database"][name]["backups"][prefix] = {"backupId": backup_resp["backupId"]}
+            state["database"][name]["backups"][prefix] = {
+                "backupId": backup_resp["backupId"],
+                "destinationId": dest_id,
+            }
 
     # 13. Save state
     save_state(state, state_file)
@@ -788,6 +792,7 @@ def cmd_apply(
         reconcile_app_settings(client, cfg, load_state(state_file))
         reconcile_databases(client, cfg, load_state(state_file), state_file)
         reconcile_database_backups(client, cfg, load_state(state_file), state_file)
+        reconcile_volume_backups(client, cfg, load_state(state_file), state_file)
 
     print("\n==> Phase 4/4: trigger")
     cmd_trigger(client, cfg, state_file, repo_root=repo_root, env_file_override=env_file_override, redeploy=is_redeploy)
@@ -827,6 +832,100 @@ def cmd_run_schedule(client: DokployClient, state_file: Path, app: str | None, s
     schedule_id = schedules[schedule_name]["scheduleId"]
     print(f"Running schedule '{schedule_name}' for {name}...")
     client.post("schedule.runManually", {"scheduleId": schedule_id})
+    print("  Triggered.")
+
+
+MANUAL_BACKUP_ENDPOINTS = {
+    "postgres": "backup.manualBackupPostgres",
+    "mysql": "backup.manualBackupMySql",
+    "mariadb": "backup.manualBackupMariadb",
+    "mongo": "backup.manualBackupMongo",
+}
+
+
+def _resolve_volume_backup(state: dict, resource: str, volume_name: str) -> str:
+    """Find a volumeBackupId for `resource` (app or database) by volume-backup name."""
+    for section in ("apps", "database"):
+        info = state.get(section, {}).get(resource)
+        if info is None:
+            continue
+        volume_backups = info.get("volumeBackups", {})
+        if volume_name in volume_backups:
+            return volume_backups[volume_name]["volumeBackupId"]
+        print(f"ERROR: No volume backup named '{volume_name}' for '{resource}'.")
+        available = ", ".join(sorted(volume_backups)) or "(none)"
+        print(f"  Available: {available}")
+        sys.exit(1)
+    print(f"ERROR: Unknown resource '{resource}' (not an app, compose service, or database).")
+    sys.exit(1)
+
+
+def _resolve_backup_prefix(backups: dict, prefix: str | None) -> str:
+    """Resolve which backup prefix to act on, auto-selecting if only one exists."""
+    if prefix is None:
+        if len(backups) == 1:
+            return next(iter(backups))
+        available = ", ".join(sorted(backups)) or "(none)"
+        print(f"ERROR: Multiple backup schedules found — specify --prefix: {available}")
+        sys.exit(1)
+    if prefix not in backups:
+        available = ", ".join(sorted(backups)) or "(none)"
+        print(f"ERROR: Unknown backup prefix '{prefix}'. Available: {available}")
+        sys.exit(1)
+    return prefix
+
+
+def cmd_backup(
+    client: DokployClient,
+    state_file: Path,
+    resource: str,
+    prefix: str | None = None,
+    list_files: bool = False,
+    volume: str | None = None,
+) -> None:
+    """Trigger a manual database backup, list backup files, or run a volume backup."""
+    state = load_state(state_file)
+
+    if volume is not None:
+        volume_backup_id = _resolve_volume_backup(state, resource, volume)
+        print(f"Running volume backup '{volume}' for {resource}...")
+        client.post("volumeBackups.runManually", {"volumeBackupId": volume_backup_id})
+        print("  Triggered.")
+        return
+
+    db_info = state.get("database", {}).get(resource)
+    if db_info is None:
+        available = ", ".join(sorted(state.get("database", {}))) or "(none)"
+        print(f"ERROR: Unknown database '{resource}'. Available: {available}")
+        sys.exit(1)
+
+    db_type = db_info["type"]
+    backups = db_info.get("backups", {})
+    if not backups:
+        print(f"ERROR: No backup schedules configured for '{resource}'.")
+        sys.exit(1)
+    chosen_prefix = _resolve_backup_prefix(backups, prefix)
+    backup_info = backups[chosen_prefix]
+
+    if list_files:
+        destination_id = backup_info.get("destinationId")
+        if not destination_id:
+            print(f"ERROR: No destinationId recorded for backup '{chosen_prefix}'. Re-run apply to refresh state.")
+            sys.exit(1)
+        files = client.get("backup.listBackupFiles", {"destinationId": destination_id, "search": chosen_prefix})
+        if not files:
+            print("(no backup files found)")
+            return
+        for f in files:
+            print(f)
+        return
+
+    if db_type not in MANUAL_BACKUP_ENDPOINTS:
+        print(f"ERROR: Manual backups are not supported for database type '{db_type}'.")
+        sys.exit(1)
+
+    print(f"Triggering manual backup '{chosen_prefix}' for {resource}...")
+    client.post(MANUAL_BACKUP_ENDPOINTS[db_type], {"backupId": backup_info["backupId"]})
     print("  Triggered.")
 
 

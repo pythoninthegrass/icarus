@@ -5660,6 +5660,73 @@ class TestBuildBackupCreatePayload:
         assert "keepLatestCount" not in payload
 
 
+class TestBuildVolumeBackupPayload:
+    def test_database_volume_backup(self):
+        vb_def = {
+            "name": "pg-data",
+            "volumeName": "postgres_data",
+            "prefix": "pg-vol",
+            "cronExpression": "0 3 * * *",
+            "destination": "s3-backups",
+            "enabled": True,
+            "keepLatestCount": 5,
+        }
+        payload = dokploy.build_volume_backup_payload(
+            vb_def,
+            destination_id="dest-1",
+            service_type="postgres",
+            service_id_key="postgresId",
+            service_id="pg-123",
+        )
+        assert payload["name"] == "pg-data"
+        assert payload["volumeName"] == "postgres_data"
+        assert payload["prefix"] == "pg-vol"
+        assert payload["cronExpression"] == "0 3 * * *"
+        assert payload["destinationId"] == "dest-1"
+        assert payload["serviceType"] == "postgres"
+        assert payload["postgresId"] == "pg-123"
+        assert payload["enabled"] is True
+        assert payload["keepLatestCount"] == 5
+
+    def test_application_volume_backup(self):
+        vb_def = {
+            "name": "app-uploads",
+            "volumeName": "uploads",
+            "prefix": "uploads-vol",
+            "cronExpression": "0 4 * * *",
+            "destination": "s3",
+        }
+        payload = dokploy.build_volume_backup_payload(
+            vb_def,
+            destination_id="dest-2",
+            service_type="application",
+            service_id_key="applicationId",
+            service_id="app-1",
+        )
+        assert payload["serviceType"] == "application"
+        assert payload["applicationId"] == "app-1"
+        assert payload["enabled"] is True  # default
+        assert "keepLatestCount" not in payload
+
+    def test_compose_volume_backup(self):
+        vb_def = {
+            "name": "compose-vol",
+            "volumeName": "data",
+            "prefix": "compose",
+            "cronExpression": "0 5 * * *",
+            "destination": "s3",
+        }
+        payload = dokploy.build_volume_backup_payload(
+            vb_def,
+            destination_id="dest-3",
+            service_type="compose",
+            service_id_key="composeId",
+            service_id="compose-1",
+        )
+        assert payload["serviceType"] == "compose"
+        assert payload["composeId"] == "compose-1"
+
+
 # ---------------------------------------------------------------------------
 # Backup setup integration tests
 # ---------------------------------------------------------------------------
@@ -5800,6 +5867,166 @@ class TestPlanBackups:
         parents = [c["parent"] for c in backup_changes]
         assert "cache" not in parents
 
+    def test_initial_setup_includes_database_volume_backups(self, tmp_path):
+        cfg = {
+            "project": {"name": "test", "description": "test"},
+            "apps": [{"name": "web", "source": "docker", "dockerImage": "nginx"}],
+            "database": [
+                {
+                    "name": "mydb",
+                    "type": "postgres",
+                    "databaseName": "myapp",
+                    "databaseUser": "u",
+                    "databasePassword": "p",
+                    "volumeBackups": [
+                        {
+                            "name": "pg-data",
+                            "volumeName": "postgres_data",
+                            "prefix": "pg-vol",
+                            "cronExpression": "0 3 * * *",
+                            "destination": "s3",
+                        }
+                    ],
+                }
+            ],
+        }
+        changes = []
+        dokploy._plan_initial_setup(cfg, tmp_path, changes)
+
+        vb_changes = [c for c in changes if c["resource_type"] == "volume_backup"]
+        assert len(vb_changes) == 1
+        assert vb_changes[0]["action"] == "create"
+        assert vb_changes[0]["name"] == "pg-data"
+        assert vb_changes[0]["parent"] == "mydb"
+        assert vb_changes[0]["attrs"]["volumeName"] == "postgres_data"
+
+    def test_initial_setup_includes_app_volume_backups(self, tmp_path):
+        cfg = {
+            "project": {"name": "test", "description": "test"},
+            "apps": [
+                {
+                    "name": "web",
+                    "source": "docker",
+                    "dockerImage": "nginx",
+                    "volumeBackups": [
+                        {
+                            "name": "web-uploads",
+                            "volumeName": "uploads",
+                            "prefix": "uploads-vol",
+                            "cronExpression": "0 4 * * *",
+                            "destination": "s3",
+                        }
+                    ],
+                }
+            ],
+        }
+        changes = []
+        dokploy._plan_initial_setup(cfg, tmp_path, changes)
+
+        vb_changes = [c for c in changes if c["resource_type"] == "volume_backup"]
+        assert len(vb_changes) == 1
+        assert vb_changes[0]["parent"] == "web"
+
+
+class TestPlanVolumeBackupsRedeploy:
+    def test_redeploy_detects_new_and_removed_app_volume_backups(self, tmp_path):
+        state = {
+            "projectId": "proj-1",
+            "apps": {
+                "web": {
+                    "applicationId": "app-1",
+                    "volumeBackups": {"stale": {"volumeBackupId": "vb-old"}},
+                },
+            },
+        }
+        cfg = {
+            "project": {"name": "test", "description": "test"},
+            "apps": [
+                {
+                    "name": "web",
+                    "source": "docker",
+                    "dockerImage": "nginx",
+                    "volumeBackups": [
+                        {
+                            "name": "new-vb",
+                            "volumeName": "uploads",
+                            "prefix": "uploads-vol",
+                            "cronExpression": "0 4 * * *",
+                            "destination": "s3",
+                        }
+                    ],
+                },
+            ],
+        }
+
+        client = MagicMock()
+
+        def mock_get(endpoint, params=None):
+            if endpoint == "volumeBackups.list":
+                return [{"volumeBackupId": "vb-old", "name": "stale"}]
+            return {}
+
+        client.get.side_effect = mock_get
+
+        changes = []
+        dokploy._plan_redeploy(client, cfg, state, tmp_path, changes)
+
+        vb_changes = [c for c in changes if c["resource_type"] == "volume_backup"]
+        creates = [c for c in vb_changes if c["action"] == "create"]
+        destroys = [c for c in vb_changes if c["action"] == "destroy"]
+        assert len(creates) == 1
+        assert creates[0]["name"] == "new-vb"
+        assert len(destroys) == 1
+        assert destroys[0]["name"] == "stale"
+
+    def test_redeploy_detects_database_volume_backup_diff(self, tmp_path):
+        state = {
+            "projectId": "proj-1",
+            "apps": {},
+            "database": {
+                "mydb": {
+                    "postgresId": "pg-1",
+                    "type": "postgres",
+                    "volumeBackups": {"stale": {"volumeBackupId": "vb-old"}},
+                }
+            },
+        }
+        cfg = {
+            "project": {"name": "test", "description": "test"},
+            "apps": [],
+            "database": [
+                {
+                    "name": "mydb",
+                    "type": "postgres",
+                    "databaseName": "myapp",
+                    "databaseUser": "u",
+                    "databasePassword": "p",
+                    "volumeBackups": [
+                        {
+                            "name": "new-vb",
+                            "volumeName": "postgres_data",
+                            "prefix": "pg-vol",
+                            "cronExpression": "0 3 * * *",
+                            "destination": "s3",
+                        }
+                    ],
+                }
+            ],
+        }
+        client = MagicMock()
+        client.get.return_value = {}
+
+        changes = []
+        dokploy._plan_redeploy(client, cfg, state, tmp_path, changes)
+
+        vb_changes = [c for c in changes if c["resource_type"] == "volume_backup"]
+        creates = [c for c in vb_changes if c["action"] == "create"]
+        destroys = [c for c in vb_changes if c["action"] == "destroy"]
+        assert len(creates) == 1
+        assert creates[0]["name"] == "new-vb"
+        assert len(destroys) == 1
+        assert destroys[0]["name"] == "stale"
+
 
 # ---------------------------------------------------------------------------
 # Backup reconciliation tests
@@ -5923,6 +6150,214 @@ class TestReconcileDatabaseBackups:
         dokploy.reconcile_database_backups(client, cfg, state, state_file)
 
         client.post.assert_not_called()
+
+
+class TestReconcileVolumeBackups:
+    def test_creates_new_volume_backup_for_database(self):
+        client = MagicMock()
+        client.get.return_value = []
+        client.post.return_value = {"volumeBackupId": "vb-1"}
+        cfg = {
+            "database": [
+                {
+                    "name": "mydb",
+                    "type": "postgres",
+                    "databaseName": "myapp",
+                    "databaseUser": "u",
+                    "databasePassword": "p",
+                    "volumeBackups": [
+                        {
+                            "name": "pg-data",
+                            "volumeName": "postgres_data",
+                            "prefix": "pg-vol",
+                            "cronExpression": "0 3 * * *",
+                            "destination": "s3",
+                        }
+                    ],
+                }
+            ],
+        }
+        state = {
+            "database": {"mydb": {"postgresId": "pg-1", "appName": "mydb-app", "type": "postgres"}},
+            "destinations": {"s3": {"destinationId": "dest-1"}},
+        }
+        state_file = MagicMock()
+
+        dokploy.reconcile_volume_backups(client, cfg, state, state_file)
+
+        create_calls = [c for c in client.post.call_args_list if c[0][0] == "volumeBackups.create"]
+        assert len(create_calls) == 1
+        assert create_calls[0][0][1]["postgresId"] == "pg-1"
+        assert state["database"]["mydb"]["volumeBackups"]["pg-data"]["volumeBackupId"] == "vb-1"
+
+    def test_updates_existing_volume_backup_by_name(self):
+        client = MagicMock()
+        client.get.return_value = [
+            {
+                "volumeBackupId": "vb-1",
+                "name": "pg-data",
+                "volumeName": "postgres_data",
+                "prefix": "old-prefix",
+                "cronExpression": "0 3 * * *",
+                "enabled": True,
+                "keepLatestCount": None,
+                "destinationId": "dest-1",
+            }
+        ]
+        client.post.return_value = {}
+        cfg = {
+            "database": [
+                {
+                    "name": "mydb",
+                    "type": "postgres",
+                    "databaseName": "myapp",
+                    "databaseUser": "u",
+                    "databasePassword": "p",
+                    "volumeBackups": [
+                        {
+                            "name": "pg-data",
+                            "volumeName": "postgres_data",
+                            "prefix": "new-prefix",
+                            "cronExpression": "0 3 * * *",
+                            "destination": "s3",
+                        }
+                    ],
+                }
+            ],
+        }
+        state = {
+            "database": {"mydb": {"postgresId": "pg-1", "appName": "mydb-app", "type": "postgres"}},
+            "destinations": {"s3": {"destinationId": "dest-1"}},
+        }
+        state_file = MagicMock()
+
+        dokploy.reconcile_volume_backups(client, cfg, state, state_file)
+
+        update_calls = [c for c in client.post.call_args_list if c[0][0] == "volumeBackups.update"]
+        assert len(update_calls) == 1
+        assert update_calls[0][0][1]["volumeBackupId"] == "vb-1"
+        assert update_calls[0][0][1]["prefix"] == "new-prefix"
+        assert state["database"]["mydb"]["volumeBackups"]["pg-data"]["volumeBackupId"] == "vb-1"
+
+    def test_deletes_removed_volume_backup(self):
+        client = MagicMock()
+        client.get.return_value = [
+            {
+                "volumeBackupId": "vb-1",
+                "name": "stale",
+                "volumeName": "v",
+                "prefix": "p",
+                "cronExpression": "0 3 * * *",
+                "enabled": True,
+                "destinationId": "dest-1",
+            }
+        ]
+        client.post.return_value = {}
+        cfg = {
+            "database": [
+                {
+                    "name": "mydb",
+                    "type": "postgres",
+                    "databaseName": "myapp",
+                    "databaseUser": "u",
+                    "databasePassword": "p",
+                    "volumeBackups": [],
+                }
+            ],
+        }
+        state = {
+            "database": {"mydb": {"postgresId": "pg-1", "appName": "mydb-app", "type": "postgres"}},
+            "destinations": {},
+        }
+        state_file = MagicMock()
+
+        dokploy.reconcile_volume_backups(client, cfg, state, state_file)
+
+        delete_calls = [c for c in client.post.call_args_list if c[0][0] == "volumeBackups.delete"]
+        assert len(delete_calls) == 1
+        assert delete_calls[0][0][1] == {"volumeBackupId": "vb-1"}
+
+    def test_creates_new_volume_backup_for_app(self):
+        client = MagicMock()
+        client.get.return_value = []
+        client.post.return_value = {"volumeBackupId": "vb-2"}
+        cfg = {
+            "apps": [
+                {
+                    "name": "web",
+                    "source": "docker",
+                    "dockerImage": "nginx:alpine",
+                    "volumeBackups": [
+                        {
+                            "name": "web-uploads",
+                            "volumeName": "uploads",
+                            "prefix": "uploads-vol",
+                            "cronExpression": "0 4 * * *",
+                            "destination": "s3",
+                        }
+                    ],
+                }
+            ],
+        }
+        state = {
+            "apps": {"web": {"applicationId": "app-1", "appName": "web"}},
+            "destinations": {"s3": {"destinationId": "dest-1"}},
+        }
+        state_file = MagicMock()
+
+        dokploy.reconcile_volume_backups(client, cfg, state, state_file)
+
+        create_calls = [c for c in client.post.call_args_list if c[0][0] == "volumeBackups.create"]
+        assert len(create_calls) == 1
+        assert create_calls[0][0][1]["serviceType"] == "application"
+        assert create_calls[0][0][1]["applicationId"] == "app-1"
+        assert state["apps"]["web"]["volumeBackups"]["web-uploads"]["volumeBackupId"] == "vb-2"
+
+    def test_creates_new_volume_backup_for_compose(self):
+        client = MagicMock()
+        client.get.return_value = []
+        client.post.return_value = {"volumeBackupId": "vb-3"}
+        cfg = {
+            "apps": [
+                {
+                    "name": "stack",
+                    "source": "compose",
+                    "composeFile": "services: {}\n",
+                    "volumeBackups": [
+                        {
+                            "name": "stack-data",
+                            "volumeName": "data",
+                            "prefix": "stack-vol",
+                            "cronExpression": "0 5 * * *",
+                            "destination": "s3",
+                        }
+                    ],
+                }
+            ],
+        }
+        state = {
+            "apps": {"stack": {"composeId": "compose-1", "appName": "stack"}},
+            "destinations": {"s3": {"destinationId": "dest-1"}},
+        }
+        state_file = MagicMock()
+
+        dokploy.reconcile_volume_backups(client, cfg, state, state_file)
+
+        create_calls = [c for c in client.post.call_args_list if c[0][0] == "volumeBackups.create"]
+        assert len(create_calls) == 1
+        assert create_calls[0][0][1]["serviceType"] == "compose"
+        assert create_calls[0][0][1]["composeId"] == "compose-1"
+
+    def test_skips_app_without_config(self):
+        client = MagicMock()
+        cfg = {"apps": [{"name": "web", "source": "docker", "dockerImage": "nginx:alpine"}]}
+        state = {"apps": {"web": {"applicationId": "app-1", "appName": "web"}}}
+        state_file = MagicMock()
+
+        dokploy.reconcile_volume_backups(client, cfg, state, state_file)
+
+        client.post.assert_not_called()
+        client.get.assert_not_called()
 
 
 class TestBuildDatabaseUpdatePayload:
@@ -6800,4 +7235,157 @@ class TestCmdRunSchedule:
         with pytest.raises(SystemExit):
             dokploy.cmd_run_schedule(client, state_file, "nonexistent", "nightly")
         assert "Unknown app" in capsys.readouterr().out
+        client.post.assert_not_called()
+
+
+class TestCmdBackup:
+    def _state_file_with_backups(self, tmp_path):
+        state_file = tmp_path / ".dokploy-state" / "test.json"
+        state = {
+            "projectId": "proj-1",
+            "apps": {
+                "web": {
+                    "applicationId": "app-1",
+                    "appName": "app-web-abc",
+                    "volumeBackups": {"web-uploads": {"volumeBackupId": "vb-web-1"}},
+                }
+            },
+            "database": {
+                "mydb": {
+                    "postgresId": "pg-1",
+                    "appName": "mydb-app",
+                    "type": "postgres",
+                    "backups": {
+                        "daily": {"backupId": "bk-1", "destinationId": "dest-1"},
+                    },
+                    "volumeBackups": {"pg-data": {"volumeBackupId": "vb-pg-1"}},
+                },
+                "multi": {
+                    "postgresId": "pg-2",
+                    "appName": "multi-app",
+                    "type": "postgres",
+                    "backups": {
+                        "daily": {"backupId": "bk-2", "destinationId": "dest-1"},
+                        "weekly": {"backupId": "bk-3", "destinationId": "dest-1"},
+                    },
+                },
+                "cache": {
+                    "redisId": "r-1",
+                    "appName": "cache-app",
+                    "type": "redis",
+                    "backups": {
+                        "daily": {"backupId": "bk-4", "destinationId": "dest-1"},
+                    },
+                },
+            },
+        }
+        dokploy.save_state(state, state_file, quiet=True)
+        return state_file
+
+    def test_triggers_manual_backup_auto_selects_prefix(self, tmp_path):
+        state_file = self._state_file_with_backups(tmp_path)
+        client = MagicMock()
+
+        dokploy.cmd_backup(client, state_file, "mydb")
+
+        calls = [c for c in client.post.call_args_list if c[0][0] == "backup.manualBackupPostgres"]
+        assert len(calls) == 1
+        assert calls[0][0][1] == {"backupId": "bk-1"}
+
+    def test_triggers_manual_backup_with_explicit_prefix(self, tmp_path):
+        state_file = self._state_file_with_backups(tmp_path)
+        client = MagicMock()
+
+        dokploy.cmd_backup(client, state_file, "multi", prefix="weekly")
+
+        calls = [c for c in client.post.call_args_list if c[0][0] == "backup.manualBackupPostgres"]
+        assert len(calls) == 1
+        assert calls[0][0][1] == {"backupId": "bk-3"}
+
+    def test_ambiguous_prefix_without_flag_exits(self, tmp_path, capsys):
+        state_file = self._state_file_with_backups(tmp_path)
+        client = MagicMock()
+
+        with pytest.raises(SystemExit):
+            dokploy.cmd_backup(client, state_file, "multi")
+        assert "Multiple backup schedules" in capsys.readouterr().out
+        client.post.assert_not_called()
+
+    def test_redis_has_no_manual_backup_exits(self, tmp_path, capsys):
+        state_file = self._state_file_with_backups(tmp_path)
+        client = MagicMock()
+
+        with pytest.raises(SystemExit):
+            dokploy.cmd_backup(client, state_file, "cache")
+        assert "not supported for database type 'redis'" in capsys.readouterr().out
+        client.post.assert_not_called()
+
+    def test_unknown_database_exits(self, tmp_path, capsys):
+        state_file = self._state_file_with_backups(tmp_path)
+        client = MagicMock()
+
+        with pytest.raises(SystemExit):
+            dokploy.cmd_backup(client, state_file, "nonexistent")
+        assert "Unknown database" in capsys.readouterr().out
+        client.post.assert_not_called()
+
+    def test_list_files_calls_list_backup_files(self, tmp_path, capsys):
+        state_file = self._state_file_with_backups(tmp_path)
+        client = MagicMock()
+        client.get.return_value = ["daily_2026-07-01.sql.gz", "daily_2026-07-02.sql.gz"]
+
+        dokploy.cmd_backup(client, state_file, "mydb", list_files=True)
+
+        calls = [c for c in client.get.call_args_list if c[0][0] == "backup.listBackupFiles"]
+        assert len(calls) == 1
+        assert calls[0][0][1] == {"destinationId": "dest-1", "search": "daily"}
+        out = capsys.readouterr().out
+        assert "daily_2026-07-01.sql.gz" in out
+        client.post.assert_not_called()
+
+    def test_list_files_empty_prints_message(self, tmp_path, capsys):
+        state_file = self._state_file_with_backups(tmp_path)
+        client = MagicMock()
+        client.get.return_value = []
+
+        dokploy.cmd_backup(client, state_file, "mydb", list_files=True)
+
+        assert "no backup files found" in capsys.readouterr().out
+
+    def test_volume_backup_for_database(self, tmp_path):
+        state_file = self._state_file_with_backups(tmp_path)
+        client = MagicMock()
+
+        dokploy.cmd_backup(client, state_file, "mydb", volume="pg-data")
+
+        calls = [c for c in client.post.call_args_list if c[0][0] == "volumeBackups.runManually"]
+        assert len(calls) == 1
+        assert calls[0][0][1] == {"volumeBackupId": "vb-pg-1"}
+
+    def test_volume_backup_for_app(self, tmp_path):
+        state_file = self._state_file_with_backups(tmp_path)
+        client = MagicMock()
+
+        dokploy.cmd_backup(client, state_file, "web", volume="web-uploads")
+
+        calls = [c for c in client.post.call_args_list if c[0][0] == "volumeBackups.runManually"]
+        assert len(calls) == 1
+        assert calls[0][0][1] == {"volumeBackupId": "vb-web-1"}
+
+    def test_unknown_volume_backup_name_exits(self, tmp_path, capsys):
+        state_file = self._state_file_with_backups(tmp_path)
+        client = MagicMock()
+
+        with pytest.raises(SystemExit):
+            dokploy.cmd_backup(client, state_file, "mydb", volume="nonexistent")
+        assert "No volume backup named" in capsys.readouterr().out
+        client.post.assert_not_called()
+
+    def test_unknown_resource_for_volume_exits(self, tmp_path, capsys):
+        state_file = self._state_file_with_backups(tmp_path)
+        client = MagicMock()
+
+        with pytest.raises(SystemExit):
+            dokploy.cmd_backup(client, state_file, "nonexistent", volume="pg-data")
+        assert "Unknown resource" in capsys.readouterr().out
         client.post.assert_not_called()

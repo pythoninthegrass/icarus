@@ -197,6 +197,22 @@ def _plan_initial_setup(cfg: dict, repo_root: Path, changes: list[dict]) -> None
                     }
                 )
 
+        for vb_def in app_def.get("volumeBackups", []):
+            changes.append(
+                {
+                    "action": "create",
+                    "resource_type": "volume_backup",
+                    "name": vb_def["name"],
+                    "parent": name,
+                    "attrs": {
+                        "volumeName": vb_def["volumeName"],
+                        "cronExpression": vb_def["cronExpression"],
+                        "destination": vb_def["destination"],
+                        "keepLatestCount": vb_def.get("keepLatestCount"),
+                    },
+                }
+            )
+
     env_targets = cfg["project"].get("env_targets", [])
     if env_targets:
         env_file = repo_root / ".env"
@@ -285,6 +301,22 @@ def _plan_initial_setup(cfg: dict, repo_root: Path, changes: list[dict]) -> None
                         "schedule": backup_def["schedule"],
                         "destination": backup_def["destination"],
                         "keepLatestCount": backup_def.get("keepLatestCount"),
+                    },
+                }
+            )
+
+        for vb_def in db_def.get("volumeBackups", []):
+            changes.append(
+                {
+                    "action": "create",
+                    "resource_type": "volume_backup",
+                    "name": vb_def["name"],
+                    "parent": db_def["name"],
+                    "attrs": {
+                        "volumeName": vb_def["volumeName"],
+                        "cronExpression": vb_def["cronExpression"],
+                        "destination": vb_def["destination"],
+                        "keepLatestCount": vb_def.get("keepLatestCount"),
                     },
                 }
             )
@@ -719,6 +751,58 @@ def _plan_redeploy(
                     }
                 )
 
+    # Volume backup diff (apps)
+    for name, app_info in state["apps"].items():
+        app_def = apps_by_name.get(name)
+        if app_def is None:
+            continue
+        compose = app_info.get("source") == "compose"
+
+        vb_cfg = app_def.get("volumeBackups")
+        if vb_cfg is None and "volumeBackups" not in app_info:
+            continue
+
+        service_id_key = "composeId" if compose else "applicationId"
+        service_type = "compose" if compose else "application"
+        service_id = app_info[service_id_key]
+        existing_vbs = client.get(
+            "volumeBackups.list",
+            {"id": service_id, "volumeBackupType": service_type},
+        )
+        if not isinstance(existing_vbs, list):
+            existing_vbs = []
+        existing_by_vb_name = {vb["name"]: vb for vb in existing_vbs}
+        desired_by_vb_name = {vb["name"]: vb for vb in (vb_cfg or [])}
+
+        for vb_name, vb_def in desired_by_vb_name.items():
+            if vb_name not in existing_by_vb_name:
+                changes.append(
+                    {
+                        "action": "create",
+                        "resource_type": "volume_backup",
+                        "name": vb_name,
+                        "parent": name,
+                        "attrs": {
+                            "volumeName": vb_def["volumeName"],
+                            "cronExpression": vb_def["cronExpression"],
+                            "destination": vb_def["destination"],
+                            "keepLatestCount": vb_def.get("keepLatestCount"),
+                        },
+                    }
+                )
+
+        for vb_name in existing_by_vb_name:
+            if vb_name not in desired_by_vb_name:
+                changes.append(
+                    {
+                        "action": "destroy",
+                        "resource_type": "volume_backup",
+                        "name": vb_name,
+                        "parent": name,
+                        "attrs": {"name": vb_name},
+                    }
+                )
+
     # Destinations diff
     existing_dests = state.get("destinations", {})
     desired_dests = {d["name"]: d for d in cfg.get("destinations", [])}
@@ -777,6 +861,48 @@ def _plan_redeploy(
                         "name": prefix,
                         "parent": db_name,
                         "attrs": {"prefix": prefix},
+                    }
+                )
+
+    # Database volume backup diff
+    for db_def in cfg.get("database", []):
+        db_name = db_def["name"]
+        db_info = state.get("database", {}).get(db_name)
+        if not db_info:
+            continue
+        vb_cfg = db_def.get("volumeBackups")
+        if vb_cfg is None and "volumeBackups" not in db_info:
+            continue
+
+        existing_vbs = db_info.get("volumeBackups", {})
+        desired_vbs = {vb["name"]: vb for vb in (vb_cfg or [])}
+
+        for vb_name, vb_def in desired_vbs.items():
+            if vb_name not in existing_vbs:
+                changes.append(
+                    {
+                        "action": "create",
+                        "resource_type": "volume_backup",
+                        "name": vb_name,
+                        "parent": db_name,
+                        "attrs": {
+                            "volumeName": vb_def["volumeName"],
+                            "cronExpression": vb_def["cronExpression"],
+                            "destination": vb_def["destination"],
+                            "keepLatestCount": vb_def.get("keepLatestCount"),
+                        },
+                    }
+                )
+
+        for vb_name in existing_vbs:
+            if vb_name not in desired_vbs:
+                changes.append(
+                    {
+                        "action": "destroy",
+                        "resource_type": "volume_backup",
+                        "name": vb_name,
+                        "parent": db_name,
+                        "attrs": {"name": vb_name},
                     }
                 )
 

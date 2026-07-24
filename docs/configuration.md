@@ -284,6 +284,99 @@ database:
 
 On subsequent `apply` (redeploy), `dockerImage` and `description` are diffed against the live database and updated via `<type>.update`. Changing `dockerImage` also triggers `<type>.rebuild` to restart the container on the new image — updating the field alone does not restart it.
 
+## `destinations`
+
+S3-compatible storage targets referenced by `backups` and `volumeBackups` entries.
+
+| Key                              | Required | Description                                                                                    |
+| -------------------------------- | -------- | ------------------------------------------------------------------------------------------------ |
+| `destinations[].name`            | yes      | Unique destination name, referenced by `backups[].destination` / `volumeBackups[].destination` |
+| `destinations[].accessKey`       | yes      | S3 access key ID                                                                                |
+| `destinations[].secretAccessKey` | yes      | S3 secret access key                                                                            |
+| `destinations[].bucket`          | yes      | S3 bucket name                                                                                  |
+| `destinations[].region`          | yes      | S3 region (e.g. `us-east-1`)                                                                    |
+| `destinations[].endpoint`        | yes      | S3-compatible endpoint URL                                                                      |
+
+```yaml
+destinations:
+  - name: s3-backups
+    accessKey: AKIAIOSFODNN7EXAMPLE
+    secretAccessKey: wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
+    bucket: my-dokploy-backups
+    region: us-east-1
+    endpoint: https://s3.amazonaws.com
+```
+
+## `database[].backups`
+
+Scheduled database backups, one per `database` entry. Postgres, MySQL, MariaDB, and Mongo support scheduled backups; Redis does not.
+
+| Key                         | Required | Description                                        |
+| --------------------------- | -------- | --------------------------------------------------- |
+| `backups[].schedule`        | yes      | 5-field cron expression for backup frequency       |
+| `backups[].prefix`          | yes      | Prefix for backup files in the destination bucket  |
+| `backups[].destination`     | yes      | Destination name (from `destinations`)             |
+| `backups[].enabled`         | no       | Whether the schedule is active (default: `true`)   |
+| `backups[].keepLatestCount` | no       | Number of latest backups to retain                 |
+
+```yaml
+database:
+  - name: app-db
+    type: postgres
+    databaseName: myapp
+    databaseUser: myuser
+    databasePassword: changeme
+    backups:
+      - schedule: "0 0 * * *"
+        prefix: daily
+        destination: s3-backups
+        keepLatestCount: 7
+```
+
+Trigger a one-off backup outside the schedule with `ic backup <db-name>` (auto-selects the prefix if only one schedule exists, otherwise pass `--prefix`), or list existing backup files with `ic backup <db-name> --list`. See [api.md](api.md) for details.
+
+## `volumeBackups`
+
+Scheduled Docker volume backups, configurable on both `apps` entries and `database` entries. Unlike `backups`, which is Postgres/MySQL/MariaDB/Mongo-specific, `volumeBackups` works for any service (application, compose, or database) and backs up a named Docker volume directly.
+
+| Key                               | Required | Description                                        |
+| --------------------------------- | -------- | --------------------------------------------------- |
+| `volumeBackups[].name`            | yes      | Unique name for this volume backup schedule        |
+| `volumeBackups[].volumeName`      | yes      | Docker volume name to back up                      |
+| `volumeBackups[].prefix`          | yes      | Prefix for backup files in the destination bucket  |
+| `volumeBackups[].cronExpression`  | yes      | 5-field cron expression for backup frequency       |
+| `volumeBackups[].destination`     | yes      | Destination name (from `destinations`)             |
+| `volumeBackups[].enabled`         | no       | Whether the schedule is active (default: `true`)   |
+| `volumeBackups[].keepLatestCount` | no       | Number of latest backups to retain                 |
+
+```yaml
+apps:
+  - name: web
+    source: docker
+    dockerImage: nginx:alpine
+    volumeBackups:
+      - name: web-uploads
+        volumeName: web_uploads
+        prefix: uploads
+        cronExpression: "0 4 * * *"
+        destination: s3-backups
+
+database:
+  - name: app-db
+    type: postgres
+    databaseName: myapp
+    databaseUser: myuser
+    databasePassword: changeme
+    volumeBackups:
+      - name: pg-data
+        volumeName: app-db_postgres_data
+        prefix: pg-data
+        cronExpression: "0 3 * * *"
+        destination: s3-backups
+```
+
+Trigger a volume backup manually with `ic backup <resource> --volume <name>`, where `<resource>` is an app, compose, or database name. See [api.md](api.md) for details.
+
 ## `{app_name}` Resolution
 
 In `command` and `env` fields, `{app_name}` placeholders are replaced with the Dokploy-assigned `appName` from the state file. This allows apps to reference each other's internal Docker network hostnames.

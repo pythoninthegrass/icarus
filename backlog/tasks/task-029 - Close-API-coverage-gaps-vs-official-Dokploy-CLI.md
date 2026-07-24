@@ -1,9 +1,10 @@
 ---
 id: TASK-029
 title: Close API coverage gaps vs official Dokploy CLI
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-07-24 15:52'
+updated_date: '2026-07-24 17:16'
 labels:
   - enhancement
   - api-coverage
@@ -11,7 +12,8 @@ dependencies: []
 references:
   - /Users/lance/.claude/plans/an-official-dokploy-cli-sunny-steele.md
   - 'https://github.com/Dokploy/cli'
-ordinal: 13000
+priority: high
+ordinal: 1000
 ---
 
 ## Description
