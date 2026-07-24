@@ -54,6 +54,12 @@ Requires the `x-api-key` header.
 
 - **`project.create`** returns a nested structure: `{"project": {...}, "environment": {...}}`.
 
+- **`project.all` vs `project.one`**: `project.all` returns nested services (applications, compose, databases) but omits `appName` on them - only `applicationId`/`applicationStatus`/`name` are present. `project.one` (GET with `?projectId=<id>`) returns the full rows including `appName`. Building a complete appName registry therefore requires one `project.one` call per project.
+
+- **`application.delete`**: POST with `{"applicationId": "..."}`. Removes the application from Dokploy and tears down its swarm service. Used by orphan cleanup for untracked applications.
+
+- **`compose.delete`**: POST with `{"composeId": "...", "deleteVolumes": bool}`. icarus passes `deleteVolumes: false` during orphan cleanup to avoid data loss.
+
 - **`schedule.runManually`**: POST with `{"scheduleId": "..."}`. Triggers an on-demand run of a configured schedule outside its cron expression. Exposed via `ic run-schedule <app> <name>`.
 
 - **`<type>.update`** (databases): Diffed against `<type>.one` on every redeploy for `dockerImage` and `description` drift. Only changed fields are sent, plus the id field (e.g. `postgresId`).
@@ -144,6 +150,18 @@ service restarts only if the effective env actually changed.
 
 If `DOKPLOY_SSH_HOST` is not set, the sync step is skipped with a warning and
 the redeploy proceeds normally.
+
+## Orphaned Service Cleanup
+
+Dokploy (pre-v0.29 especially) can leave headless Docker swarm services running after their owning application was deleted from the panel, and untracked applications can accumulate in a project's environment. `ic apply` (redeploy path), `ic clean`, and `ic destroy` run a two-stage cleanup via `cleanup_orphans`:
+
+1. **Project-level (API)**: `project.one` fetches the tracked project's environment; any application/compose in it whose id is not in the state file is listed and, after confirmation, removed via `application.delete`/`compose.delete` (`deleteVolumes: false`). Databases are deliberately excluded (data-loss risk). If the project no longer exists on the server (404), this stage is skipped gracefully.
+
+2. **Swarm-level (SSH)**: requires `DOKPLOY_SSH_HOST`; skipped with a message otherwise. A global appName registry is built from `project.all` + `project.one` per project (see quirk above). `docker service ls` output is then filtered: a service is orphaned only if its owner name (for compose stacks, the `{appName}_{service}` prefix before the first `_`) is unknown to every Dokploy project AND matches an expected prefix (`app-` legacy names, or prefixes derived from the state file's tracked appNames). Dokploy system services (`dokploy`, `dokploy-postgres`, `dokploy-redis`, `dokploy-traefik`) are always skipped. If the registry fetch fails (`httpx.HTTPError`), the swarm scan is aborted rather than risking removal of live services from a partial known-set.
+
+Note: Dokploy swarm services carry no labels and all share `dokploy-network`, so project membership cannot be determined from Docker metadata - only from the API registry. This is why a service unknown to ALL projects (not just the current one) is the orphan criterion.
+
+`ic clean --dry-run` lists everything both stages would remove without removing anything; the non-dry-run path prompts for confirmation (`[y/N]`) before deleting.
 
 ## Health Check / Pre-flight
 

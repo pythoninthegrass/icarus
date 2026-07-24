@@ -104,7 +104,7 @@ cd my-project
 | `plan`    | Preview changes `apply` would make without executing them (dry run)                             |
 | `apply`   | Full pipeline: check, setup, env, trigger deploys in `deploy_order` wave sequence               |
 | `status`  | Show application status for all apps in the project                                             |
-| `clean`   | Remove stale Traefik rules and Docker artifacts                                                 |
+| `clean`   | Remove stale Traefik rules, orphaned Dokploy apps, and orphaned swarm services                  |
 | `destroy` | Delete the Dokploy project (cascades to all apps) and remove state file                         |
 | `logs`    | Tail container logs (`-f` to follow, `-n` for line count, `--exited` for stopped containers)    |
 | `exec`    | Open an interactive shell or run a command in a running container                               |

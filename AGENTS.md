@@ -50,6 +50,7 @@ ic --env prod plan                       # Preview what apply would change (dry 
 ic --env prod apply                      # Full pipeline: check, setup, env, trigger
 ic --env prod status                     # Check status
 ic --env prod clean                      # Remove stale Traefik/Docker artifacts
+ic --env prod clean --dry-run            # Preview cleanup without removing anything
 ic --env prod destroy                    # Tear down
 ic --env prod logs django                # Tail 100 lines of container logs
 ic --env prod logs django -f             # Follow log output

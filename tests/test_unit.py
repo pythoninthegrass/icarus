@@ -767,6 +767,7 @@ class TestUnifiedApply:
             lambda client, cfg, sf, repo_root=None, env_file_override=None, redeploy=False: calls.append("trigger"),
         )
         monkeypatch.setattr(icarus_commands, "validate_state", lambda client, state: True)
+        monkeypatch.setattr(icarus_commands, "cleanup_orphans", lambda client, cfg, state, dry_run=False: None)
 
         dokploy.cmd_apply(
             repo_root=tmp_path,
@@ -796,6 +797,7 @@ class TestUnifiedApply:
             ),
         )
         monkeypatch.setattr(icarus_commands, "validate_state", lambda client, state: True)
+        monkeypatch.setattr(icarus_commands, "cleanup_orphans", lambda client, cfg, state, dry_run=False: None)
 
         dokploy.cmd_apply(
             repo_root=tmp_path,
@@ -962,7 +964,7 @@ class TestCleanupStaleRoutes:
         assert domains == {"web.example.com", "api.example.com", "api2.example.com"}
 
     def test_cleanup_called_during_redeploy(self, tmp_path, monkeypatch):
-        """cmd_apply calls cleanup_stale_routes when redeploying."""
+        """cmd_apply calls cleanup_orphans when redeploying."""
         calls = []
         state_file = tmp_path / ".dokploy-state" / "prod.json"
         state_file.parent.mkdir(parents=True)
@@ -974,7 +976,7 @@ class TestCleanupStaleRoutes:
             icarus_commands, "cmd_trigger", lambda client, cfg, sf, repo_root=None, env_file_override=None, redeploy=False: None
         )
         monkeypatch.setattr(icarus_commands, "validate_state", lambda client, state: True)
-        monkeypatch.setattr(icarus_commands, "cleanup_stale_routes", lambda state, cfg: calls.append("cleanup"))
+        monkeypatch.setattr(icarus_commands, "cleanup_orphans", lambda client, cfg, state, dry_run=False: calls.append("cleanup"))
 
         dokploy.cmd_apply(
             repo_root=tmp_path,
@@ -986,7 +988,7 @@ class TestCleanupStaleRoutes:
         assert "cleanup" in calls
 
     def test_cleanup_not_called_on_fresh_apply(self, tmp_path, monkeypatch):
-        """cmd_apply does not call cleanup_stale_routes on fresh apply."""
+        """cmd_apply does not call cleanup_orphans on fresh apply."""
         calls = []
         state_file = tmp_path / ".dokploy-state" / "prod.json"
 
@@ -996,7 +998,7 @@ class TestCleanupStaleRoutes:
         monkeypatch.setattr(
             icarus_commands, "cmd_trigger", lambda client, cfg, sf, repo_root=None, env_file_override=None, redeploy=False: None
         )
-        monkeypatch.setattr(icarus_commands, "cleanup_stale_routes", lambda state, cfg: calls.append("cleanup"))
+        monkeypatch.setattr(icarus_commands, "cleanup_orphans", lambda client, cfg, state, dry_run=False: calls.append("cleanup"))
 
         dokploy.cmd_apply(
             repo_root=tmp_path,
@@ -1733,35 +1735,52 @@ class TestScheduleSchemaValidation:
 
 
 class TestCmdClean:
-    def test_cmd_clean_calls_cleanup_stale_routes(self, tmp_path, monkeypatch):
-        """cmd_clean delegates to cleanup_stale_routes with state and config."""
+    def test_cmd_clean_calls_cleanup_orphans(self, tmp_path, monkeypatch):
+        """cmd_clean delegates to cleanup_orphans with client, config, and state."""
         calls = []
         state = {"projectId": "proj-1", "apps": {"web": {"appName": "app-web-abc"}}}
         state_file = tmp_path / ".dokploy-state" / "prod.json"
         state_file.parent.mkdir(parents=True)
         state_file.write_text(json.dumps(state))
 
-        monkeypatch.setattr(icarus_commands, "cleanup_stale_routes", lambda s, c: calls.append(("cleanup", s, c)))
+        monkeypatch.setattr(
+            icarus_commands, "cleanup_orphans", lambda client, cfg, s, dry_run=False: calls.append((client, cfg, s, dry_run))
+        )
 
         cfg = {"apps": [{"name": "web"}]}
-        dokploy.cmd_clean(cfg, state_file)
+        dokploy.cmd_clean("client", cfg, state_file)
 
         assert len(calls) == 1
-        assert calls[0][0] == "cleanup"
-        assert calls[0][1]["apps"]["web"]["appName"] == "app-web-abc"
-        assert calls[0][2] is cfg
+        assert calls[0][0] == "client"
+        assert calls[0][1] is cfg
+        assert calls[0][2]["apps"]["web"]["appName"] == "app-web-abc"
+        assert calls[0][3] is False
+
+    def test_cmd_clean_passes_dry_run(self, tmp_path, monkeypatch):
+        """cmd_clean forwards the dry_run flag to cleanup_orphans."""
+        calls = []
+        state = {"projectId": "proj-1", "apps": {}}
+        state_file = tmp_path / ".dokploy-state" / "prod.json"
+        state_file.parent.mkdir(parents=True)
+        state_file.write_text(json.dumps(state))
+
+        monkeypatch.setattr(icarus_commands, "cleanup_orphans", lambda client, cfg, s, dry_run=False: calls.append(dry_run))
+
+        dokploy.cmd_clean("client", {"apps": []}, state_file, dry_run=True)
+
+        assert calls == [True]
 
 
 class TestCmdDestroyCallsCleanup:
     def test_destroy_calls_cleanup_before_delete(self, tmp_path, monkeypatch):
-        """cmd_destroy calls cleanup_stale_routes before deleting the project."""
+        """cmd_destroy calls cleanup_orphans before deleting the project."""
         order = []
         state = {"projectId": "proj-1", "apps": {"web": {"appName": "app-web-abc"}}}
         state_file = tmp_path / ".dokploy-state" / "prod.json"
         state_file.parent.mkdir(parents=True)
         state_file.write_text(json.dumps(state))
 
-        monkeypatch.setattr(icarus_commands, "cleanup_stale_routes", lambda s, c: order.append("cleanup"))
+        monkeypatch.setattr(icarus_commands, "cleanup_orphans", lambda client, cfg, s, dry_run=False: order.append("cleanup"))
 
         client = MagicMock()
         client.post = MagicMock(side_effect=lambda *a, **kw: order.append("project.remove"))
@@ -1815,6 +1834,491 @@ class TestCleanupSkipsWhenAllSshVarsMissing:
         dokploy.cleanup_stale_routes(state, cfg)
 
         ssh_mock.connect.assert_called_once()
+
+    def test_dry_run_lists_without_removing(self, monkeypatch, capsys):
+        """cleanup_stale_routes with dry_run prints stale routes but removes nothing."""
+
+        def fake_config(key, default=""):
+            if key == "DOKPLOY_SSH_HOST":
+                return "server.example.com"
+            return default
+
+        monkeypatch.setattr(icarus_ssh, "config", MagicMock(side_effect=fake_config))
+        monkeypatch.setattr(icarus_ssh, "_open_ssh", lambda host, user, port: MagicMock())
+        commands = []
+
+        def fake_exec(ssh, cmd):
+            commands.append(cmd)
+            if cmd.startswith("ls "):
+                return "/etc/dokploy/traefik/dynamic/app-stale-xyz.yml"
+            if cmd.startswith("cat "):
+                return "Host(`example.com`)"
+            return ""
+
+        monkeypatch.setattr(icarus_ssh, "_ssh_exec", fake_exec)
+
+        state = {"apps": {"web": {"appName": "app-web-abc"}}}
+        cfg = {
+            "apps": [
+                {"name": "web", "domain": {"host": "example.com", "port": 80, "https": True, "certificateType": "letsencrypt"}}
+            ]
+        }
+
+        dokploy.cleanup_stale_routes(state, cfg, dry_run=True)
+
+        assert not any("rm" in c for c in commands)
+        out = capsys.readouterr().out
+        assert "app-stale-xyz" in out
+        assert "dry run" in out.lower()
+
+
+class TestConfirm:
+    def test_yes_accepts(self, monkeypatch):
+        """confirm returns True for a 'y' answer."""
+        monkeypatch.setattr("builtins.input", lambda prompt: "y")
+        assert icarus_ssh.confirm("Remove? ") is True
+
+    def test_yes_word_accepts(self, monkeypatch):
+        """confirm returns True for a 'yes' answer."""
+        monkeypatch.setattr("builtins.input", lambda prompt: "Yes")
+        assert icarus_ssh.confirm("Remove? ") is True
+
+    def test_no_rejects(self, monkeypatch):
+        """confirm returns False for a 'n' answer."""
+        monkeypatch.setattr("builtins.input", lambda prompt: "n")
+        assert icarus_ssh.confirm("Remove? ") is False
+
+    def test_empty_rejects(self, monkeypatch):
+        """confirm returns False for an empty answer (default no)."""
+        monkeypatch.setattr("builtins.input", lambda prompt: "")
+        assert icarus_ssh.confirm("Remove? ") is False
+
+    def test_eof_rejects(self, monkeypatch):
+        """confirm returns False when stdin is not interactive (EOF)."""
+
+        def raise_eof(prompt):
+            raise EOFError
+
+        monkeypatch.setattr("builtins.input", raise_eof)
+        assert icarus_ssh.confirm("Remove? ") is False
+
+
+class TestFindOrphanedServices:
+    def test_flags_unknown_app_prefixed_service(self):
+        """A Dokploy-style app-* service unknown to any project is orphaned."""
+        orphans = dokploy.find_orphaned_services(
+            known_app_names={"app-live-abc123"},
+            tracked_app_names={"app-live-abc123"},
+            swarm_services=["app-live-abc123", "app-stale-xyz789"],
+        )
+        assert orphans == {"app-stale-xyz789"}
+
+    def test_skips_services_known_to_other_projects(self):
+        """Services registered to any Dokploy project are never flagged."""
+        orphans = dokploy.find_orphaned_services(
+            known_app_names={"app-other-live-def456"},
+            tracked_app_names=set(),
+            swarm_services=["app-other-live-def456"],
+        )
+        assert orphans == set()
+
+    def test_skips_system_services(self):
+        """Dokploy's own infrastructure services are never flagged."""
+        orphans = dokploy.find_orphaned_services(
+            known_app_names=set(),
+            tracked_app_names=set(),
+            swarm_services=["dokploy", "dokploy-postgres", "dokploy-redis", "dokploy-traefik"],
+        )
+        assert orphans == set()
+
+    def test_skips_non_dokploy_services(self):
+        """Services that don't match any Dokploy naming pattern are left alone."""
+        orphans = dokploy.find_orphaned_services(
+            known_app_names=set(),
+            tracked_app_names=set(),
+            swarm_services=["my-custom-service", "registry"],
+        )
+        assert orphans == set()
+
+    def test_matches_prefix_from_tracked_appnames(self):
+        """New-style {project}-{app}-{suffix} orphans match prefixes derived from tracked appNames."""
+        orphans = dokploy.find_orphaned_services(
+            known_app_names={"middleware-celery-q118zj"},
+            tracked_app_names={"middleware-celery-q118zj"},
+            swarm_services=["middleware-celery-q118zj", "middleware-celery-d5376f"],
+        )
+        assert orphans == {"middleware-celery-d5376f"}
+
+    def test_keeps_stack_services_of_known_compose(self):
+        """Compose stack services ({appName}_{service}) of a registered app are kept."""
+        orphans = dokploy.find_orphaned_services(
+            known_app_names={"app-stack-abc123"},
+            tracked_app_names=set(),
+            swarm_services=["app-stack-abc123_web", "app-stack-abc123_worker"],
+        )
+        assert orphans == set()
+
+    def test_flags_stack_services_of_unknown_app(self):
+        """Compose stack services of an unregistered app-* stack are orphaned."""
+        orphans = dokploy.find_orphaned_services(
+            known_app_names=set(),
+            tracked_app_names=set(),
+            swarm_services=["app-old-xyz789_worker"],
+        )
+        assert orphans == {"app-old-xyz789_worker"}
+
+
+class TestFindUntrackedProjectServices:
+    def _project(self, applications=None, compose=None, env_id="env-1"):
+        return {
+            "environments": [
+                {
+                    "environmentId": env_id,
+                    "applications": applications or [],
+                    "compose": compose or [],
+                }
+            ]
+        }
+
+    def test_finds_untracked_application(self):
+        """Applications in the project's environment but not in state are untracked."""
+        state = {
+            "environmentId": "env-1",
+            "apps": {"web": {"applicationId": "id-web", "appName": "app-web-abc"}},
+        }
+        project = self._project(
+            applications=[
+                {"applicationId": "id-web", "appName": "app-web-abc", "name": "web"},
+                {"applicationId": "id-old", "appName": "app-old-xyz", "name": "celery"},
+            ]
+        )
+        untracked = dokploy.find_untracked_project_services(state, project)
+        assert [u["appName"] for u in untracked] == ["app-old-xyz"]
+        assert untracked[0]["kind"] == "application"
+        assert untracked[0]["id"] == "id-old"
+
+    def test_finds_untracked_compose(self):
+        """Compose services in the environment but not in state are untracked."""
+        state = {
+            "environmentId": "env-1",
+            "apps": {"stack": {"composeId": "id-stack", "appName": "compose-stack-abc", "source": "compose"}},
+        }
+        project = self._project(
+            compose=[
+                {"composeId": "id-stack", "appName": "compose-stack-abc", "name": "stack"},
+                {"composeId": "id-old", "appName": "compose-old-xyz", "name": "old-stack"},
+            ]
+        )
+        untracked = dokploy.find_untracked_project_services(state, project)
+        assert [u["appName"] for u in untracked] == ["compose-old-xyz"]
+        assert untracked[0]["kind"] == "compose"
+
+    def test_ignores_other_environments(self):
+        """Services in environments other than the state's environment are ignored."""
+        state = {"environmentId": "env-1", "apps": {}}
+        project = self._project(
+            applications=[{"applicationId": "id-x", "appName": "app-x-abc", "name": "x"}],
+            env_id="env-2",
+        )
+        assert dokploy.find_untracked_project_services(state, project) == []
+
+    def test_all_tracked_returns_empty(self):
+        """Nothing is flagged when every service in the environment is tracked."""
+        state = {
+            "environmentId": "env-1",
+            "apps": {"web": {"applicationId": "id-web", "appName": "app-web-abc"}},
+        }
+        project = self._project(applications=[{"applicationId": "id-web", "appName": "app-web-abc", "name": "web"}])
+        assert dokploy.find_untracked_project_services(state, project) == []
+
+
+class TestCollectKnownAppNames:
+    def test_collects_across_projects_and_service_types(self):
+        """Gathers appNames from applications, compose, and databases in every project."""
+
+        def fake_get(path, params=None):
+            if path == "project.all":
+                return [{"projectId": "p1"}, {"projectId": "p2"}]
+            if path == "project.one" and params == {"projectId": "p1"}:
+                return {
+                    "environments": [
+                        {
+                            "environmentId": "e1",
+                            "applications": [{"appName": "app-web-abc"}],
+                            "compose": [{"appName": "compose-stack-def"}],
+                            "postgres": [{"appName": "db-pg-ghi"}],
+                        }
+                    ]
+                }
+            if path == "project.one" and params == {"projectId": "p2"}:
+                return {"environments": [{"environmentId": "e2", "applications": [{"appName": "app-other-jkl"}]}]}
+            raise AssertionError(f"unexpected path: {path}")
+
+        client = MagicMock()
+        client.get = MagicMock(side_effect=fake_get)
+        known = dokploy.collect_known_app_names(client)
+        assert known == {"app-web-abc", "compose-stack-def", "db-pg-ghi", "app-other-jkl"}
+
+
+class TestCleanupOrphanedProjectApps:
+    def _state_and_project(self):
+        state = {
+            "projectId": "p1",
+            "environmentId": "env-1",
+            "apps": {"web": {"applicationId": "id-web", "appName": "app-web-abc"}},
+        }
+        project = {
+            "environments": [
+                {
+                    "environmentId": "env-1",
+                    "applications": [
+                        {"applicationId": "id-web", "appName": "app-web-abc", "name": "web"},
+                        {"applicationId": "id-old", "appName": "app-old-xyz", "name": "celery"},
+                    ],
+                    "compose": [],
+                }
+            ]
+        }
+        return state, project
+
+    def test_removes_untracked_application_after_confirm(self, monkeypatch, capsys):
+        """Untracked applications are deleted via application.delete after confirmation."""
+        state, project = self._state_and_project()
+        client = MagicMock()
+        client.get.return_value = project
+        monkeypatch.setattr(icarus_commands, "confirm", lambda prompt: True)
+
+        dokploy.cleanup_orphaned_project_apps(client, state)
+
+        client.post.assert_called_once_with("application.delete", {"applicationId": "id-old"})
+        assert "Removed: app-old-xyz" in capsys.readouterr().out
+
+    def test_untracked_compose_deleted_via_compose_delete(self, monkeypatch):
+        """Untracked compose services are deleted via compose.delete."""
+        state = {"projectId": "p1", "environmentId": "env-1", "apps": {}}
+        project = {
+            "environments": [
+                {
+                    "environmentId": "env-1",
+                    "applications": [],
+                    "compose": [{"composeId": "id-c", "appName": "compose-old-xyz", "name": "stack"}],
+                }
+            ]
+        }
+        client = MagicMock()
+        client.get.return_value = project
+        monkeypatch.setattr(icarus_commands, "confirm", lambda prompt: True)
+
+        dokploy.cleanup_orphaned_project_apps(client, state)
+
+        client.post.assert_called_once_with("compose.delete", {"composeId": "id-c", "deleteVolumes": False})
+
+    def test_dry_run_removes_nothing(self, monkeypatch, capsys):
+        """Dry run lists untracked services without deleting them."""
+        state, project = self._state_and_project()
+        client = MagicMock()
+        client.get.return_value = project
+
+        dokploy.cleanup_orphaned_project_apps(client, state, dry_run=True)
+
+        client.post.assert_not_called()
+        assert "app-old-xyz" in capsys.readouterr().out
+
+    def test_declined_confirm_removes_nothing(self, monkeypatch):
+        """Answering no to the confirmation prompt skips deletion."""
+        state, project = self._state_and_project()
+        client = MagicMock()
+        client.get.return_value = project
+        monkeypatch.setattr(icarus_commands, "confirm", lambda prompt: False)
+
+        dokploy.cleanup_orphaned_project_apps(client, state)
+
+        client.post.assert_not_called()
+
+    def test_no_untracked_no_prompt(self, monkeypatch):
+        """No prompt is shown when everything in the project is tracked."""
+        state = {
+            "projectId": "p1",
+            "environmentId": "env-1",
+            "apps": {"web": {"applicationId": "id-web", "appName": "app-web-abc"}},
+        }
+        project = {
+            "environments": [
+                {
+                    "environmentId": "env-1",
+                    "applications": [{"applicationId": "id-web", "appName": "app-web-abc", "name": "web"}],
+                    "compose": [],
+                }
+            ]
+        }
+        client = MagicMock()
+        client.get.return_value = project
+
+        def fail_confirm(prompt):
+            raise AssertionError("confirm should not be called")
+
+        monkeypatch.setattr(icarus_commands, "confirm", fail_confirm)
+
+        dokploy.cleanup_orphaned_project_apps(client, state)
+
+        client.post.assert_not_called()
+
+    def test_missing_project_skips_gracefully(self, capsys):
+        """A project no longer on the server (404) is skipped, not a crash."""
+        state = {"projectId": "p-gone", "environmentId": "env-1", "apps": {}}
+        client = MagicMock()
+        request = httpx.Request("GET", "https://dokploy.example.com/api/project.one")
+        response = httpx.Response(404, request=request)
+        client.get.side_effect = httpx.HTTPStatusError("404 Not Found", request=request, response=response)
+
+        dokploy.cleanup_orphaned_project_apps(client, state)
+
+        client.post.assert_not_called()
+        assert "skipping" in capsys.readouterr().out.lower()
+
+
+class TestCleanupOrphanedServices:
+    def _setup_ssh(self, monkeypatch, services):
+        def fake_config(key, default=""):
+            if key == "DOKPLOY_SSH_HOST":
+                return "server.example.com"
+            return default
+
+        monkeypatch.setattr(icarus_ssh, "config", MagicMock(side_effect=fake_config))
+        monkeypatch.setattr(icarus_ssh, "_open_ssh", lambda host, user, port: MagicMock())
+        commands = []
+
+        def fake_exec(ssh, cmd):
+            commands.append(cmd)
+            if cmd.startswith("docker service ls"):
+                return "\n".join(services)
+            return ""
+
+        monkeypatch.setattr(icarus_ssh, "_ssh_exec", fake_exec)
+        return commands
+
+    def test_skips_without_ssh_host(self, monkeypatch, capsys):
+        """Skips gracefully when DOKPLOY_SSH_HOST is not configured."""
+        monkeypatch.setattr(icarus_ssh, "config", MagicMock(side_effect=lambda key, default="": default))
+        dokploy.cleanup_orphaned_services({"apps": {}}, {"app-live-abc"})
+        assert "skipping" in capsys.readouterr().out.lower()
+
+    def test_removes_orphans_after_confirm(self, monkeypatch, capsys):
+        """Orphaned services are removed via docker service rm after confirmation."""
+        commands = self._setup_ssh(monkeypatch, ["app-live-abc123", "app-stale-xyz789", "dokploy"])
+        monkeypatch.setattr(icarus_ssh, "confirm", lambda prompt: True)
+        state = {"apps": {"web": {"appName": "app-live-abc123"}}}
+
+        dokploy.cleanup_orphaned_services(state, {"app-live-abc123"})
+
+        assert any("docker service rm app-stale-xyz789" in c for c in commands)
+        assert not any("docker service rm app-live-abc123" in c for c in commands)
+        assert "Removed: app-stale-xyz789" in capsys.readouterr().out
+
+    def test_dry_run_lists_without_removing(self, monkeypatch, capsys):
+        """Dry run prints orphans but does not remove them."""
+        commands = self._setup_ssh(monkeypatch, ["app-live-abc123", "app-stale-xyz789"])
+        state = {"apps": {"web": {"appName": "app-live-abc123"}}}
+
+        dokploy.cleanup_orphaned_services(state, {"app-live-abc123"}, dry_run=True)
+
+        assert not any("docker service rm" in c for c in commands)
+        out = capsys.readouterr().out
+        assert "app-stale-xyz789" in out
+        assert "dry run" in out.lower()
+
+    def test_declined_confirm_removes_nothing(self, monkeypatch):
+        """Answering no to the confirmation prompt skips removal."""
+        commands = self._setup_ssh(monkeypatch, ["app-stale-xyz789"])
+        monkeypatch.setattr(icarus_ssh, "confirm", lambda prompt: False)
+
+        dokploy.cleanup_orphaned_services({"apps": {}}, set())
+
+        assert not any("docker service rm" in c for c in commands)
+
+    def test_no_orphans_no_prompt(self, monkeypatch):
+        """No prompt is shown when there are no orphaned services."""
+        commands = self._setup_ssh(monkeypatch, ["app-live-abc123", "dokploy"])
+
+        def fail_confirm(prompt):
+            raise AssertionError("confirm should not be called")
+
+        monkeypatch.setattr(icarus_ssh, "confirm", fail_confirm)
+        state = {"apps": {"web": {"appName": "app-live-abc123"}}}
+
+        dokploy.cleanup_orphaned_services(state, {"app-live-abc123"})
+
+        assert not any("docker service rm" in c for c in commands)
+
+
+class TestCleanupOrphans:
+    def _ssh_host_config(self, monkeypatch, host="server.example.com"):
+        def fake_config(key, default=""):
+            if key == "DOKPLOY_SSH_HOST":
+                return host
+            return default
+
+        monkeypatch.setattr(icarus_commands, "config", MagicMock(side_effect=fake_config))
+
+    def test_runs_all_cleanup_passes(self, monkeypatch):
+        """cleanup_orphans runs route cleanup, project cleanup, then swarm cleanup."""
+        self._ssh_host_config(monkeypatch)
+        order = []
+        monkeypatch.setattr(icarus_commands, "cleanup_stale_routes", lambda state, cfg, dry_run=False: order.append("routes"))
+        monkeypatch.setattr(
+            icarus_commands, "cleanup_orphaned_project_apps", lambda client, state, dry_run=False: order.append("project")
+        )
+        monkeypatch.setattr(icarus_commands, "collect_known_app_names", lambda client: order.append("known") or {"app-x"})
+        monkeypatch.setattr(
+            icarus_commands, "cleanup_orphaned_services", lambda state, known, dry_run=False: order.append("services")
+        )
+
+        dokploy.cleanup_orphans("client", {"apps": []}, {"apps": {}})
+
+        assert order == ["routes", "project", "known", "services"]
+
+    def test_swarm_scan_skipped_on_api_error(self, monkeypatch, capsys):
+        """Swarm cleanup is skipped (not crashed) when the known-name fetch fails."""
+        self._ssh_host_config(monkeypatch)
+        monkeypatch.setattr(icarus_commands, "cleanup_stale_routes", lambda state, cfg, dry_run=False: None)
+        monkeypatch.setattr(icarus_commands, "cleanup_orphaned_project_apps", lambda client, state, dry_run=False: None)
+
+        def boom(client):
+            raise httpx.ConnectError("refused")
+
+        monkeypatch.setattr(icarus_commands, "collect_known_app_names", boom)
+
+        def fail_cleanup(state, known, dry_run=False):
+            raise AssertionError("swarm cleanup should not run")
+
+        monkeypatch.setattr(icarus_commands, "cleanup_orphaned_services", fail_cleanup)
+
+        dokploy.cleanup_orphans("client", {"apps": []}, {"apps": {}})
+
+        assert "skipping" in capsys.readouterr().out.lower()
+
+    def test_swarm_scan_skipped_without_ssh_host(self, monkeypatch):
+        """Known-name fetch and swarm cleanup are skipped when SSH is not configured."""
+        self._ssh_host_config(monkeypatch, host="")
+        order = []
+        monkeypatch.setattr(icarus_commands, "cleanup_stale_routes", lambda state, cfg, dry_run=False: order.append("routes"))
+        monkeypatch.setattr(
+            icarus_commands, "cleanup_orphaned_project_apps", lambda client, state, dry_run=False: order.append("project")
+        )
+
+        def fail_collect(client):
+            raise AssertionError("known-name fetch should not run without SSH")
+
+        monkeypatch.setattr(icarus_commands, "collect_known_app_names", fail_collect)
+
+        def fail_cleanup(state, known, dry_run=False):
+            raise AssertionError("swarm cleanup should not run without SSH")
+
+        monkeypatch.setattr(icarus_commands, "cleanup_orphaned_services", fail_cleanup)
+
+        dokploy.cleanup_orphans("client", {"apps": []}, {"apps": {}})
+
+        assert order == ["routes", "project"]
 
 
 def _make_plan_state(app_defs, project_id="proj-123", environment_id="env-456"):
@@ -3090,7 +3594,7 @@ class TestCmdApplyCallsReconcileMounts:
             icarus_commands, "cmd_trigger", lambda client, cfg, sf, repo_root=None, env_file_override=None, redeploy=False: None
         )
         monkeypatch.setattr(icarus_commands, "validate_state", lambda client, state: True)
-        monkeypatch.setattr(icarus_commands, "cleanup_stale_routes", lambda state, cfg: None)
+        monkeypatch.setattr(icarus_commands, "cleanup_orphans", lambda client, cfg, state, dry_run=False: None)
         monkeypatch.setattr(icarus_commands, "reconcile_app_domains", lambda client, cfg, state, sf: None)
         monkeypatch.setattr(icarus_commands, "reconcile_app_schedules", lambda client, cfg, state, sf: None)
         monkeypatch.setattr(
@@ -3698,7 +4202,7 @@ class TestCmdApplyReconcileAppSettings:
         monkeypatch.setattr(
             icarus_commands, "cmd_trigger", lambda client, cfg, sf, repo_root=None, env_file_override=None, redeploy=False: None
         )
-        monkeypatch.setattr(icarus_commands, "cleanup_stale_routes", lambda state, cfg: None)
+        monkeypatch.setattr(icarus_commands, "cleanup_orphans", lambda client, cfg, state, dry_run=False: None)
         monkeypatch.setattr(icarus_commands, "reconcile_app_domains", lambda client, cfg, state, sf: None)
         monkeypatch.setattr(icarus_commands, "reconcile_app_schedules", lambda client, cfg, state, sf: None)
         monkeypatch.setattr(icarus_commands, "reconcile_app_mounts", lambda client, cfg, state, sf: None)
@@ -3879,7 +4383,7 @@ class TestCmdApplyReconcilePorts:
         monkeypatch.setattr(
             icarus_commands, "cmd_trigger", lambda client, cfg, sf, repo_root=None, env_file_override=None, redeploy=False: None
         )
-        monkeypatch.setattr(icarus_commands, "cleanup_stale_routes", lambda state, cfg: None)
+        monkeypatch.setattr(icarus_commands, "cleanup_orphans", lambda client, cfg, state, dry_run=False: None)
         monkeypatch.setattr(icarus_commands, "reconcile_app_domains", lambda client, cfg, state, sf: None)
         monkeypatch.setattr(icarus_commands, "reconcile_app_schedules", lambda client, cfg, state, sf: None)
         monkeypatch.setattr(icarus_commands, "reconcile_app_mounts", lambda client, cfg, state, sf: None)
@@ -4811,7 +5315,7 @@ class TestCmdApplyReconcileSecurity:
             icarus_commands, "cmd_trigger", lambda client, cfg, sf, repo_root=None, env_file_override=None, redeploy=False: None
         )
         monkeypatch.setattr(icarus_commands, "validate_state", lambda client, state: True)
-        monkeypatch.setattr(icarus_commands, "cleanup_stale_routes", lambda state, cfg: None)
+        monkeypatch.setattr(icarus_commands, "cleanup_orphans", lambda client, cfg, state, dry_run=False: None)
         monkeypatch.setattr(icarus_commands, "reconcile_app_domains", lambda client, cfg, state, sf: None)
         monkeypatch.setattr(icarus_commands, "reconcile_app_schedules", lambda client, cfg, state, sf: None)
         monkeypatch.setattr(icarus_commands, "reconcile_app_mounts", lambda client, cfg, state, sf: None)
@@ -5272,7 +5776,7 @@ class TestCmdApplyReconcileRedirects:
         monkeypatch.setattr(
             icarus_commands, "cmd_trigger", lambda client, cfg, sf, repo_root=None, env_file_override=None, redeploy=False: None
         )
-        monkeypatch.setattr(icarus_commands, "cleanup_stale_routes", lambda state, cfg: None)
+        monkeypatch.setattr(icarus_commands, "cleanup_orphans", lambda client, cfg, state, dry_run=False: None)
         monkeypatch.setattr(icarus_commands, "reconcile_app_domains", lambda client, cfg, state, sf: None)
         monkeypatch.setattr(icarus_commands, "reconcile_app_schedules", lambda client, cfg, state, sf: None)
         monkeypatch.setattr(icarus_commands, "reconcile_app_mounts", lambda client, cfg, state, sf: None)

@@ -59,7 +59,9 @@ from icarus.reconcile import (
     reconcile_volume_backups,
 )
 from icarus.ssh import (
+    cleanup_orphaned_services,
     cleanup_stale_routes,
+    confirm,
     get_containers,
     get_docker_client,
     get_ssh_config,
@@ -778,7 +780,7 @@ def cmd_apply(
     cmd_env(client, cfg, state_file, repo_root, env_file_override=env_file_override)
 
     if is_redeploy:
-        cleanup_stale_routes(load_state(state_file), cfg)
+        cleanup_orphans(client, cfg, load_state(state_file))
         reconcile_registries(client, cfg, load_state(state_file), state_file)
         reconcile_destinations(client, cfg, load_state(state_file), state_file)
         reconcile_certificates(client, cfg, load_state(state_file), state_file, repo_root=repo_root)
@@ -1009,18 +1011,137 @@ def cmd_exec(client: DokployClient, state_file: Path, app: str | None, exited: b
         docker_client.close()
 
 
-def cmd_clean(cfg: dict, state_file: Path) -> None:
+ENVIRONMENT_SERVICE_KEYS = ("applications", "compose", "postgres", "mysql", "mariadb", "mongo", "redis", "libsql")
+
+
+def find_untracked_project_services(state: dict, project: dict) -> list[dict]:
+    """List applications/compose in the project's environment that state does not track.
+
+    Only inspects the environment recorded in state, so services in other
+    environments of the same project are left alone. Databases are excluded
+    deliberately: deleting an untracked database risks data loss.
+    """
+    tracked_ids = set()
+    for info in state.get("apps", {}).values():
+        for key in ("applicationId", "composeId"):
+            if info.get(key):
+                tracked_ids.add(info[key])
+
+    untracked = []
+    for env in project.get("environments", []):
+        if env.get("environmentId") != state.get("environmentId"):
+            continue
+        for app in env.get("applications") or []:
+            if app.get("applicationId") not in tracked_ids:
+                untracked.append(
+                    {
+                        "kind": "application",
+                        "id": app["applicationId"],
+                        "appName": app.get("appName") or app.get("name", ""),
+                        "name": app.get("name", ""),
+                    }
+                )
+        for comp in env.get("compose") or []:
+            if comp.get("composeId") not in tracked_ids:
+                untracked.append(
+                    {
+                        "kind": "compose",
+                        "id": comp["composeId"],
+                        "appName": comp.get("appName") or comp.get("name", ""),
+                        "name": comp.get("name", ""),
+                    }
+                )
+    return untracked
+
+
+def cleanup_orphaned_project_apps(client: DokployClient, state: dict, *, dry_run: bool = False) -> None:
+    """Remove services registered in the Dokploy project that state no longer tracks.
+
+    Uses Dokploy's own records (project.one), so it catches headless services
+    that cleanup_stale_routes cannot see. Prompts for confirmation before
+    deleting anything. Skips gracefully when the project no longer exists on
+    the server (stale state file).
+    """
+    try:
+        project: dict = client.get("project.one", {"projectId": state["projectId"]})  # type: ignore[assignment]
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code == 404:
+            print(f"  Project cleanup: skipping (project {state['projectId']} not found on server)")
+            return
+        raise
+    untracked = find_untracked_project_services(state, project)
+    if not untracked:
+        return
+
+    print(f"  Found {len(untracked)} untracked service(s) in project:")
+    for svc in untracked:
+        print(f"    {svc['appName']} ({svc['kind']} '{svc['name']}')")
+    if dry_run:
+        print("  Dry run: no services removed.")
+        return
+    if not confirm("  Remove these from Dokploy? [y/N]: "):
+        print("  Skipped untracked service removal.")
+        return
+    for svc in untracked:
+        if svc["kind"] == "compose":
+            client.post("compose.delete", {"composeId": svc["id"], "deleteVolumes": False})
+        else:
+            client.post("application.delete", {"applicationId": svc["id"]})
+        print(f"    Removed: {svc['appName']}")
+
+
+def collect_known_app_names(client: DokployClient) -> set[str]:
+    """Gather every appName Dokploy tracks across all projects and environments.
+
+    project.all omits appName on nested services, so each project is fetched
+    via project.one, which returns full service rows.
+    """
+    known: set[str] = set()
+    projects = client.get("project.all")
+    for proj in projects:
+        project: dict = client.get("project.one", {"projectId": proj["projectId"]})  # type: ignore[assignment]
+        for env in project.get("environments", []):
+            for key in ENVIRONMENT_SERVICE_KEYS:
+                for svc in env.get(key) or []:
+                    if svc.get("appName"):
+                        known.add(svc["appName"])
+    return known
+
+
+def cleanup_orphans(client: DokployClient, cfg: dict, state: dict, *, dry_run: bool = False) -> None:
+    """Run all cleanup passes: stale traefik routes, untracked project services, orphaned swarm services.
+
+    The swarm scan needs both SSH access and the full server-wide appName
+    registry (to guarantee services of other projects are never touched), so
+    it is skipped when DOKPLOY_SSH_HOST is unset or the registry fetch fails.
+    """
+    cleanup_stale_routes(state, cfg, dry_run=dry_run)
+    cleanup_orphaned_project_apps(client, state, dry_run=dry_run)
+
+    host: str = config("DOKPLOY_SSH_HOST", default="")  # type: ignore[assignment]
+    if not host:
+        print("  Orphan cleanup: skipping swarm scan (DOKPLOY_SSH_HOST not set)")
+        return
+    try:
+        known = collect_known_app_names(client)
+    except httpx.HTTPError as exc:
+        print(f"  Orphan cleanup: skipping swarm scan (API error: {exc})")
+        return
+    cleanup_orphaned_services(state, known, dry_run=dry_run)
+
+
+def cmd_clean(client: DokployClient, cfg: dict, state_file: Path, dry_run: bool = False) -> None:
     """Remove stale Traefik configs and orphaned Docker services."""
     state = load_state(state_file)
-    print("Cleaning stale routes...")
-    cleanup_stale_routes(state, cfg)
+    print("Cleaning stale routes and orphaned services...")
+    cleanup_orphans(client, cfg, state, dry_run=dry_run)
     print("Clean complete.")
 
 
 def cmd_destroy(client: DokployClient, cfg: dict, state_file: Path) -> None:
     state = load_state(state_file)
 
-    cleanup_stale_routes(state, cfg)
+    cleanup_orphans(client, cfg, state)
 
     project_id = state["projectId"]
     print(f"Deleting project {project_id} (cascades to all apps)...")

@@ -897,8 +897,18 @@ class TestCmdDestroy:
         state_file.parent.mkdir(parents=True, exist_ok=True)
         state_file.write_text(json.dumps(state))
 
-    def test_happy_path(self, tmp_path):
+    def _disable_ssh(self, monkeypatch) -> None:
+        """Neutralize DOKPLOY_SSH_* so cleanup skips SSH-based passes."""
+        no_ssh = lambda key, default="": default  # noqa: E731
+        monkeypatch.setattr("icarus.commands.config", no_ssh)
+        monkeypatch.setattr("icarus.ssh.config", no_ssh)
+
+    def _mock_empty_project(self, router) -> None:
+        router.get(f"{BASE_URL}/api/project.one").mock(return_value=httpx.Response(200, json={"environments": []}))
+
+    def test_happy_path(self, tmp_path, monkeypatch):
         """Destroy calls project.remove and deletes state file."""
+        self._disable_ssh(monkeypatch)
         state = {
             "projectId": "proj-1",
             "environmentId": "env-1",
@@ -908,6 +918,7 @@ class TestCmdDestroy:
         self._write_state(state_file, state)
 
         router = respx.Router()
+        self._mock_empty_project(router)
         remove_route = router.post(f"{BASE_URL}/api/project.remove").mock(return_value=httpx.Response(200, json={}))
         client = _make_client(router)
 
@@ -920,8 +931,9 @@ class TestCmdDestroy:
         # Verify state file deleted
         assert not state_file.exists()
 
-    def test_uses_project_remove_not_delete(self, tmp_path):
+    def test_uses_project_remove_not_delete(self, tmp_path, monkeypatch):
         """API quirk: uses project.remove, not project.delete."""
+        self._disable_ssh(monkeypatch)
         state = {
             "projectId": "proj-1",
             "environmentId": "env-1",
@@ -931,6 +943,7 @@ class TestCmdDestroy:
         self._write_state(state_file, state)
 
         router = respx.Router()
+        self._mock_empty_project(router)
         remove_route = router.post(f"{BASE_URL}/api/project.remove").mock(return_value=httpx.Response(200, json={}))
         client = _make_client(router)
 
@@ -940,8 +953,11 @@ class TestCmdDestroy:
 
 
 class TestFullPipeline:
-    def test_setup_env_apply_status_destroy(self, tmp_path, web_app_config):
+    def test_setup_env_apply_status_destroy(self, tmp_path, web_app_config, monkeypatch):
         """Full lifecycle: setup -> env -> apply -> status -> destroy."""
+        no_ssh = lambda key, default="": default  # noqa: E731
+        monkeypatch.setattr("icarus.commands.config", no_ssh)
+        monkeypatch.setattr("icarus.ssh.config", no_ssh)
         repo_root = tmp_path
 
         # Write .env file
@@ -965,6 +981,7 @@ class TestFullPipeline:
             )
 
         router.get(f"{BASE_URL}/api/application.one").mock(side_effect=_app_one)
+        router.get(f"{BASE_URL}/api/project.one").mock(return_value=httpx.Response(200, json={"environments": []}))
         router.post(f"{BASE_URL}/api/project.remove").mock(return_value=httpx.Response(200, json={}))
 
         client = _make_client(router)

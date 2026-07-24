@@ -2,6 +2,8 @@ from icarus.cli import main
 from icarus.client import DokployClient, load_state, save_state, validate_state
 from icarus.commands import (
     MANUAL_BACKUP_ENDPOINTS,
+    cleanup_orphaned_project_apps,
+    cleanup_orphans,
     cmd_apply,
     cmd_backup,
     cmd_check,
@@ -17,6 +19,8 @@ from icarus.commands import (
     cmd_setup,
     cmd_status,
     cmd_trigger,
+    collect_known_app_names,
+    find_untracked_project_services,
 )
 from icarus.config import _build_config, config, find_repo_root
 from icarus.env import (
@@ -100,8 +104,11 @@ from icarus.ssh import (
     TRAEFIK_DYNAMIC_DIR,
     _ssh_exec,
     build_docker_url,
+    cleanup_orphaned_services,
     cleanup_stale_routes,
     collect_domains,
+    confirm,
+    find_orphaned_services,
     find_stale_app_names,
     get_containers,
     get_docker_client,

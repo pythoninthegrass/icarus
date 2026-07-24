@@ -13,6 +13,16 @@ if TYPE_CHECKING:
 
 TRAEFIK_DYNAMIC_DIR = "/etc/dokploy/traefik/dynamic"
 
+DOKPLOY_SYSTEM_SERVICES = {"dokploy", "dokploy-postgres", "dokploy-redis", "dokploy-traefik"}
+
+
+def confirm(prompt: str) -> bool:
+    """Ask a yes/no question; defaults to no. Returns False when stdin is not interactive."""
+    try:
+        return input(prompt).strip().lower() in ("y", "yes")
+    except EOFError:
+        return False
+
 
 def get_ssh_config() -> dict:
     """Read SSH connection settings from environment."""
@@ -81,6 +91,40 @@ def find_stale_app_names(current_app_names: set[str], domains: set[str], traefik
     return stale
 
 
+def find_orphaned_services(known_app_names: set[str], tracked_app_names: set[str], swarm_services: list[str]) -> set[str]:
+    """Identify Dokploy-generated swarm services that no project tracks.
+
+    A service is orphaned when its owning appName (the part before any
+    ``_<service>`` stack suffix) is unknown to every Dokploy project and it
+    matches a Dokploy naming pattern: the legacy ``app-`` prefix, or a
+    ``{project}-{app}-`` prefix derived from a tracked appName. This catches
+    headless services (workers, schedulers) that have no traefik config and
+    are invisible to cleanup_stale_routes.
+
+    Args:
+        known_app_names: appNames registered in any Dokploy project (all projects on the server).
+        tracked_app_names: appNames in the current deployment state.
+        swarm_services: docker swarm service names present on the server.
+
+    Returns:
+        Set of orphaned service names to remove.
+    """
+    prefixes = {"app-"}
+    for name in tracked_app_names:
+        if "-" in name:
+            prefixes.add(name.rsplit("-", 1)[0] + "-")
+    orphans: set[str] = set()
+    for service in swarm_services:
+        owner = service.split("_", 1)[0]
+        if not owner or owner in known_app_names or owner in tracked_app_names:
+            continue
+        if owner in DOKPLOY_SYSTEM_SERVICES:
+            continue
+        if any(owner.startswith(prefix) for prefix in prefixes):
+            orphans.add(service)
+    return orphans
+
+
 def _ssh_exec(ssh: paramiko.SSHClient, cmd: str) -> str:
     """Run a command over SSH and return stdout."""
     _, stdout, _ = ssh.exec_command(cmd)
@@ -145,10 +189,11 @@ def sync_service_envs(state: dict, app_envs: dict[str, str]) -> None:
         ssh.close()
 
 
-def cleanup_stale_routes(state: dict, cfg: dict) -> None:
+def cleanup_stale_routes(state: dict, cfg: dict, *, dry_run: bool = False) -> None:
     """Remove traefik configs and docker services for orphaned deployments.
 
     Skips gracefully if all three DOKPLOY_SSH_ env vars are missing.
+    With dry_run, prints what would be removed without touching anything.
     """
     host: str = config("DOKPLOY_SSH_HOST", default="")  # type: ignore[assignment]
     user: str = config("DOKPLOY_SSH_USER", default="")  # type: ignore[assignment]
@@ -181,12 +226,61 @@ def cleanup_stale_routes(state: dict, cfg: dict) -> None:
         if not stale:
             return
 
+        if dry_run:
+            print(f"  Dry run: would remove {len(stale)} stale route(s):")
+            for app_name in sorted(stale):
+                print(f"    {app_name}")
+            return
+
         print(f"  Cleaning up {len(stale)} stale route(s)...")
         for app_name in sorted(stale):
             config_path = f"{TRAEFIK_DYNAMIC_DIR}/{app_name}.yml"
             _ssh_exec(ssh, f"rm -f {config_path}")
             _ssh_exec(ssh, f"docker service rm {app_name} 2>/dev/null")
             print(f"    Removed: {app_name}")
+    finally:
+        ssh.close()
+
+
+def cleanup_orphaned_services(state: dict, known_app_names: set[str], *, dry_run: bool = False) -> None:
+    """Remove Dokploy-generated docker swarm services that no project tracks.
+
+    Complements cleanup_stale_routes by catching headless services (celery
+    workers, beat schedulers) that have no traefik config. Only services
+    unknown to every Dokploy project are candidates, so services belonging
+    to other projects on the server are never touched. Prompts for
+    confirmation before removing; skips gracefully when DOKPLOY_SSH_HOST
+    is not set.
+    """
+    host: str = config("DOKPLOY_SSH_HOST", default="")  # type: ignore[assignment]
+    if not host:
+        print("  Orphan cleanup: skipping (DOKPLOY_SSH_HOST not set)")
+        return
+    user: str = config("DOKPLOY_SSH_USER", default="")  # type: ignore[assignment]
+    port: str = config("DOKPLOY_SSH_PORT", default="")  # type: ignore[assignment]
+
+    tracked = {info["appName"] for info in state.get("apps", {}).values() if info.get("appName")}
+    tracked |= {info["appName"] for info in state.get("database", {}).values() if info.get("appName")}
+
+    ssh = _open_ssh(host, user or "root", int(port) if port else 22)
+    try:
+        listing = _ssh_exec(ssh, "docker service ls --format '{{.Name}}'")
+        orphans = find_orphaned_services(known_app_names, tracked, listing.splitlines())
+        if not orphans:
+            return
+
+        print(f"  Found {len(orphans)} orphaned service(s):")
+        for service in sorted(orphans):
+            print(f"    {service}")
+        if dry_run:
+            print("  Dry run: no services removed.")
+            return
+        if not confirm("  Remove these services? [y/N]: "):
+            print("  Skipped orphaned service removal.")
+            return
+        for service in sorted(orphans):
+            _ssh_exec(ssh, f"docker service rm {shlex.quote(service)} 2>/dev/null")
+            print(f"    Removed: {service}")
     finally:
         ssh.close()
 

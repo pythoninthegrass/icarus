@@ -66,7 +66,8 @@ def main() -> None:
     sub.add_parser("apply", help="Full pipeline: check, setup, env, trigger")
     sub.add_parser("trigger", help="Deploy apps in wave order")
     sub.add_parser("status", help="Show deployment status")
-    sub.add_parser("clean", help="Remove stale Traefik configs and orphaned Docker services")
+    clean_parser = sub.add_parser("clean", help="Remove stale Traefik configs and orphaned Docker services")
+    clean_parser.add_argument("--dry-run", action="store_true", help="List what would be removed without removing anything")
     sub.add_parser("destroy", help="Delete project and state file")
     sub.add_parser("import", help="Import existing project from server")
 
@@ -158,7 +159,7 @@ def main() -> None:
         case "status":
             cmd_status(client, state_file)
         case "clean":
-            cmd_clean(cfg, state_file)
+            cmd_clean(client, cfg, state_file, dry_run=args.dry_run)
         case "destroy":
             cmd_destroy(client, cfg, state_file)
         case "import":
