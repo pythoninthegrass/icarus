@@ -1,5 +1,30 @@
 # Changelog
 
+## [0.4.0](https://github.com/pythoninthegrass/icarus/compare/icarus-v0.3.1...icarus-v0.4.0) (2026-07-24)
+
+
+### Features
+
+* add rustfs example and fix same-host multi-path domain support ([8d9db20](https://github.com/pythoninthegrass/icarus/commit/8d9db20a77305679e9fd0091ec6c01d7bebf1b9d))
+* **apps:** add resource limits, health check, and restart policy config ([559e7ad](https://github.com/pythoninthegrass/icarus/commit/559e7ad080e0d529d55c331aa2fbf29ad6b4daa4))
+* **backup:** add manual DB backups and declarative volume backups ([a4f8b03](https://github.com/pythoninthegrass/icarus/commit/a4f8b036e54c2d730ee15c1ba6c07b6ec699faca))
+* **clean:** remove orphaned headless services via API and swarm scan ([e024542](https://github.com/pythoninthegrass/icarus/commit/e0245427318232321de488b9fa9a636abba1e9c7))
+* **git-provider:** add list/remove commands for the shared gitProvider group ([17f64ec](https://github.com/pythoninthegrass/icarus/commit/17f64ecfef69987ac100b4c2310abe47a9a0fcae))
+* **reconcile:** close declarative completeness gaps in existing resource groups ([5a349eb](https://github.com/pythoninthegrass/icarus/commit/5a349eb7e4885a0f8b3be34308dc22694babda0f))
+* **setup:** add server field support for remote Dokploy servers ([aee5688](https://github.com/pythoninthegrass/icarus/commit/aee56884211471fbcccf08fec314300e737e05ef))
+
+
+### Bug Fixes
+
+* **examples:** remove duplicate creds from rustfs dokploy.yml; drop stale .yml.example ([b617e79](https://github.com/pythoninthegrass/icarus/commit/b617e7972e6e42b70efce6a871f78c6c34c79d7d))
+
+
+### Documentation
+
+* add static-site example dokploy.yml ([5926e13](https://github.com/pythoninthegrass/icarus/commit/5926e1308d85916840ab370038feb665e6549aac))
+* add static-site example with reverse proxy ([f06690e](https://github.com/pythoninthegrass/icarus/commit/f06690ead27b4f7e84d9701903f2a4a3f4e2da54))
+* **api:** document out-of-scope API groups as non-goals ([cf3699b](https://github.com/pythoninthegrass/icarus/commit/cf3699bc1127d4a77904bcd87d44e709d2ac103a))
+
 ## [0.3.1](https://github.com/pythoninthegrass/icarus/compare/icarus-v0.3.0...icarus-v0.3.1) (2026-07-09)
 
 
