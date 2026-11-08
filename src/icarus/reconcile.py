@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import httpx
-from icarus.client import save_state
+from icarus.client import create_and_get_id, save_state
 from icarus.env import resolve_refs
 from icarus.payloads import (
     build_app_settings_payload,
@@ -65,8 +65,16 @@ def reconcile_schedules(
                 client.post("schedule.update", update_payload)
             result_state[name] = {"scheduleId": schedule_id}
         else:
-            resp = client.post("schedule.create", payload)
-            result_state[name] = {"scheduleId": resp["scheduleId"]}
+            schedule_id = create_and_get_id(
+                client,
+                "schedule.create",
+                payload,
+                "scheduleId",
+                read_endpoint="schedule.list",
+                read_params={"id": app_id, "scheduleType": "application"},
+                match={"name": name},
+            )
+            result_state[name] = {"scheduleId": schedule_id}
 
     for name, ex in existing_by_name.items():
         if name not in desired_by_name:
@@ -135,8 +143,17 @@ def reconcile_mounts(
                 client.post("mounts.update", update_payload)
             result_state[path] = {"mountId": mount_id}
         else:
-            resp = client.post("mounts.create", payload)
-            result_state[path] = {"mountId": resp["mountId"]}
+            mount_id = create_and_get_id(
+                client,
+                "mounts.create",
+                payload,
+                "mountId",
+                read_endpoint="application.one",
+                read_params={"applicationId": app_id},
+                read_container="mounts",
+                match={"mountPath": path},
+            )
+            result_state[path] = {"mountId": mount_id}
 
     for path, ex in existing_by_path.items():
         if path not in desired_by_path:
@@ -177,8 +194,17 @@ def reconcile_ports(
                 client.post("port.update", update_payload)
             result_state[pub_port] = {"portId": port_id}
         else:
-            resp = client.post("port.create", payload)
-            result_state[pub_port] = {"portId": resp["portId"]}
+            port_id = create_and_get_id(
+                client,
+                "port.create",
+                payload,
+                "portId",
+                read_endpoint="application.one",
+                read_params={"applicationId": app_id},
+                read_container="ports",
+                match={"publishedPort": pub_port},
+            )
+            result_state[pub_port] = {"portId": port_id}
 
     for pub_port, ex in existing_by_port.items():
         if pub_port not in desired_by_port:
@@ -244,8 +270,17 @@ def reconcile_redirects(
                 client.post("redirects.update", update_payload)
             result_state[regex] = {"redirectId": redirect_id}
         else:
-            resp = client.post("redirects.create", payload)
-            result_state[regex] = {"redirectId": resp["redirectId"]}
+            redirect_id = create_and_get_id(
+                client,
+                "redirects.create",
+                payload,
+                "redirectId",
+                read_endpoint="application.one",
+                read_params={"applicationId": app_id},
+                read_container="redirects",
+                match={"regex": regex},
+            )
+            result_state[regex] = {"redirectId": redirect_id}
 
     for regex, ex in existing_by_regex.items():
         if regex not in desired_by_regex:
@@ -356,8 +391,19 @@ def reconcile_domains(
                 client.post("domain.update", update_payload)
             result_state[state_key] = {"domainId": domain_id}
         else:
-            resp = client.post("domain.create", payload)
-            result_state[state_key] = {"domainId": resp["domainId"]}
+            domain_match = {"host": host}
+            if path and path != "/":
+                domain_match["path"] = path
+            domain_id = create_and_get_id(
+                client,
+                "domain.create",
+                payload,
+                "domainId",
+                read_endpoint="domain.byComposeId" if compose else "domain.byApplicationId",
+                read_params={"composeId": resource_id} if compose else {"applicationId": resource_id},
+                match=domain_match,
+            )
+            result_state[state_key] = {"domainId": domain_id}
 
     for key, ex in existing_by_key.items():
         if key not in desired_by_key:
@@ -459,8 +505,14 @@ def reconcile_registries(
             client.post("registry.update", update_payload)
         else:
             payload = build_registry_create_payload(reg_def)
-            resp = client.post("registry.create", payload)
-            registry_id = resp["registryId"]
+            registry_id = create_and_get_id(
+                client,
+                "registry.create",
+                payload,
+                "registryId",
+                read_endpoint="registry.all",
+                match={"registryName": name},
+            )
         state["registries"][name] = {"registryId": registry_id}
 
         try:
@@ -526,8 +578,17 @@ def reconcile_security(
                 client.post("security.update", update_payload)
             result_state[username] = {"securityId": security_id}
         else:
-            resp = client.post("security.create", payload)
-            result_state[username] = {"securityId": resp["securityId"]}
+            security_id = create_and_get_id(
+                client,
+                "security.create",
+                payload,
+                "securityId",
+                read_endpoint="application.one",
+                read_params={"applicationId": app_id},
+                read_container="security",
+                match={"username": username},
+            )
+            result_state[username] = {"securityId": security_id}
 
     for username, ex in existing_by_user.items():
         if username not in desired_by_user:
@@ -587,8 +648,14 @@ def reconcile_destinations(
             client.post("destination.update", update_payload)
         else:
             payload = build_destination_create_payload(dest_def)
-            resp = client.post("destination.create", payload)
-            destination_id = resp["destinationId"]
+            destination_id = create_and_get_id(
+                client,
+                "destination.create",
+                payload,
+                "destinationId",
+                read_endpoint="destination.all",
+                match={"name": name},
+            )
         state["destinations"][name] = {"destinationId": destination_id}
 
         try:
@@ -630,8 +697,14 @@ def reconcile_certificates(
             certificate_id = existing_by_name[name]["certificateId"]
         else:
             payload = build_certificate_create_payload(cert_def, organization_id, effective_root)
-            resp = client.post("certificates.create", payload)
-            certificate_id = resp["certificateId"]
+            certificate_id = create_and_get_id(
+                client,
+                "certificates.create",
+                payload,
+                "certificateId",
+                read_endpoint="certificates.all",
+                match={"name": name},
+            )
         state["certificates"][name] = {"certificateId": certificate_id}
 
     for name in list(state["certificates"]):
@@ -722,8 +795,16 @@ def reconcile_database_backups(
                     db_name=name,
                     destination_id=destination_id,
                 )
-                resp = client.post("backup.create", payload)
-                result_state[prefix] = {"backupId": resp["backupId"], "destinationId": destination_id}
+                backup_id = create_and_get_id(
+                    client,
+                    "backup.create",
+                    payload,
+                    "backupId",
+                    read_endpoint="backup.all",
+                    read_params={id_key: db_id},
+                    match={"prefix": prefix},
+                )
+                result_state[prefix] = {"backupId": backup_id, "destinationId": destination_id}
 
         for prefix, ex in existing_by_prefix.items():
             if prefix not in desired_by_prefix:
@@ -774,8 +855,16 @@ def _reconcile_volume_backups_for_service(
                 client.post("volumeBackups.update", update_payload)
             result_state[vb_name] = {"volumeBackupId": volume_backup_id}
         else:
-            resp = client.post("volumeBackups.create", payload)
-            result_state[vb_name] = {"volumeBackupId": resp["volumeBackupId"]}
+            volume_backup_id = create_and_get_id(
+                client,
+                "volumeBackups.create",
+                payload,
+                "volumeBackupId",
+                read_endpoint="volumeBackups.list",
+                read_params={"id": service_id, "volumeBackupType": service_type},
+                match={"name": vb_name},
+            )
+            result_state[vb_name] = {"volumeBackupId": volume_backup_id}
 
     for vb_name, ex in existing_by_name.items():
         if vb_name not in desired_by_name:

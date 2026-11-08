@@ -4,7 +4,7 @@ import httpx
 import os
 import sys
 import yaml
-from icarus.client import load_state, save_state, validate_state
+from icarus.client import create_and_get_id, created_row, load_state, save_state, validate_state
 from icarus.config import config
 from icarus.env import (
     filter_env,
@@ -74,6 +74,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from icarus.client import DokployClient
 
 
@@ -257,8 +258,14 @@ def cmd_setup(client: DokployClient, cfg: dict, state_file: Path, repo_root: Pat
             else:
                 print(f"  Creating registry: {name}...")
                 payload = build_registry_create_payload(reg_def)
-                resp = client.post("registry.create", payload)
-                registry_id = resp["registryId"]
+                registry_id = create_and_get_id(
+                    client,
+                    "registry.create",
+                    payload,
+                    "registryId",
+                    read_endpoint="registry.all",
+                    match={"registryName": name},
+                )
                 print(f"  Registry created: {registry_id}")
             state["registries"][name] = {"registryId": registry_id}
 
@@ -279,8 +286,14 @@ def cmd_setup(client: DokployClient, cfg: dict, state_file: Path, repo_root: Pat
             else:
                 print(f"  Creating destination: {name}...")
                 payload = build_destination_create_payload(dest_def)
-                resp = client.post("destination.create", payload)
-                destination_id = resp["destinationId"]
+                destination_id = create_and_get_id(
+                    client,
+                    "destination.create",
+                    payload,
+                    "destinationId",
+                    read_endpoint="destination.all",
+                    match={"name": name},
+                )
                 print(f"  Destination created: {destination_id}")
             state["destinations"][name] = {"destinationId": destination_id}
 
@@ -300,8 +313,14 @@ def cmd_setup(client: DokployClient, cfg: dict, state_file: Path, repo_root: Pat
             else:
                 print(f"  Creating certificate: {name}...")
                 payload = build_certificate_create_payload(cert_def, organization_id, effective_root)
-                resp = client.post("certificates.create", payload)
-                certificate_id = resp["certificateId"]
+                certificate_id = create_and_get_id(
+                    client,
+                    "certificates.create",
+                    payload,
+                    "certificateId",
+                    read_endpoint="certificates.all",
+                    match={"name": name},
+                )
                 print(f"  Certificate created: {certificate_id}")
             state["certificates"][name] = {"certificateId": certificate_id}
 
@@ -334,8 +353,9 @@ def cmd_setup(client: DokployClient, cfg: dict, state_file: Path, repo_root: Pat
             if server_id:
                 payload["serverId"] = server_id
             result = client.post("compose.create", payload)
-            compose_id = result["composeId"]
-            app_name = result["appName"]
+            compose_row = created_row(client, "compose.create", result, "composeId")
+            compose_id = compose_row["composeId"]
+            app_name = compose_row["appName"]
             state["apps"][name] = {
                 "composeId": compose_id,
                 "appName": app_name,
@@ -351,8 +371,9 @@ def cmd_setup(client: DokployClient, cfg: dict, state_file: Path, repo_root: Pat
                 "application.create",
                 payload,
             )
-            app_id = result["applicationId"]
-            app_name = result["appName"]
+            app_row = created_row(client, "application.create", result, "applicationId")
+            app_id = app_row["applicationId"]
+            app_name = app_row["appName"]
             state["apps"][name] = {"applicationId": app_id, "appName": app_name}
             print(f"  {name}: id={app_id} appName={app_name}")
 
@@ -479,8 +500,17 @@ def cmd_setup(client: DokployClient, cfg: dict, state_file: Path, repo_root: Pat
         for port in ports:
             print(f"Creating port for {name}: {port['publishedPort']} -> {port['targetPort']}...")
             port_payload = build_port_payload(app_id, port)
-            resp = client.post("port.create", port_payload)
-            state["apps"][name]["ports"][port["publishedPort"]] = {"portId": resp["portId"]}
+            port_id = create_and_get_id(
+                client,
+                "port.create",
+                port_payload,
+                "portId",
+                read_endpoint="application.one",
+                read_params={"applicationId": app_id},
+                read_container="ports",
+                match={"publishedPort": port["publishedPort"]},
+            )
+            state["apps"][name]["ports"][port["publishedPort"]] = {"portId": port_id}
 
     # 10. Schedules
     for app_def in cfg["apps"]:
@@ -495,8 +525,16 @@ def cmd_setup(client: DokployClient, cfg: dict, state_file: Path, repo_root: Pat
         for sched in schedules:
             print(f"Creating schedule for {name}: {sched['name']}...")
             sched_payload = build_schedule_payload(app_id, sched)
-            resp = client.post("schedule.create", sched_payload)
-            state["apps"][name]["schedules"][sched["name"]] = {"scheduleId": resp["scheduleId"]}
+            schedule_id = create_and_get_id(
+                client,
+                "schedule.create",
+                sched_payload,
+                "scheduleId",
+                read_endpoint="schedule.list",
+                read_params={"id": app_id, "scheduleType": "application"},
+                match={"name": sched["name"]},
+            )
+            state["apps"][name]["schedules"][sched["name"]] = {"scheduleId": schedule_id}
 
     # 11. Security (basic auth)
     for app_def in cfg["apps"]:
@@ -511,8 +549,17 @@ def cmd_setup(client: DokployClient, cfg: dict, state_file: Path, repo_root: Pat
         for sec in security:
             print(f"Creating security for {name}: {sec['username']}...")
             sec_payload = build_security_payload(app_id, sec)
-            resp = client.post("security.create", sec_payload)
-            state["apps"][name]["security"][sec["username"]] = {"securityId": resp["securityId"]}
+            security_id = create_and_get_id(
+                client,
+                "security.create",
+                sec_payload,
+                "securityId",
+                read_endpoint="application.one",
+                read_params={"applicationId": app_id},
+                read_container="security",
+                match={"username": sec["username"]},
+            )
+            state["apps"][name]["security"][sec["username"]] = {"securityId": security_id}
 
     # 12. Databases
     # 11. Redirects
@@ -528,8 +575,17 @@ def cmd_setup(client: DokployClient, cfg: dict, state_file: Path, repo_root: Pat
         for redir in redirects:
             print(f"Creating redirect for {name}: {redir['regex']}...")
             redir_payload = build_redirect_payload(app_id, redir)
-            resp = client.post("redirects.create", redir_payload)
-            state["apps"][name]["redirects"][redir["regex"]] = {"redirectId": resp["redirectId"]}
+            redirect_id = create_and_get_id(
+                client,
+                "redirects.create",
+                redir_payload,
+                "redirectId",
+                read_endpoint="application.one",
+                read_params={"applicationId": app_id},
+                read_container="redirects",
+                match={"regex": redir["regex"]},
+            )
+            state["apps"][name]["redirects"][redir["regex"]] = {"redirectId": redirect_id}
 
     # 12. Databases
     for db_def in cfg.get("database", []):
@@ -539,8 +595,9 @@ def cmd_setup(client: DokployClient, cfg: dict, state_file: Path, repo_root: Pat
         print(f"Creating {db_type} database: {name}...")
         payload = build_database_create_payload(name, db_def, environment_id)
         resp = client.post(database_endpoint(db_type, "create"), payload)
-        db_id = resp[id_key]
-        app_name = resp.get("appName", name)
+        db_row = created_row(client, database_endpoint(db_type, "create"), resp, id_key)
+        db_id = db_row[id_key]
+        app_name = db_row.get("appName", name)
         if "database" not in state:
             state["database"] = {}
         state["database"][name] = {id_key: db_id, "appName": app_name, "type": db_type}
@@ -565,11 +622,19 @@ def cmd_setup(client: DokployClient, cfg: dict, state_file: Path, repo_root: Pat
                 db_name=name,
                 destination_id=dest_id,
             )
-            backup_resp = client.post("backup.create", backup_payload)
+            backup_id = create_and_get_id(
+                client,
+                "backup.create",
+                backup_payload,
+                "backupId",
+                read_endpoint="backup.all",
+                read_params={id_key: db_id},
+                match={"prefix": prefix},
+            )
             if "backups" not in state["database"][name]:
                 state["database"][name]["backups"] = {}
             state["database"][name]["backups"][prefix] = {
-                "backupId": backup_resp["backupId"],
+                "backupId": backup_id,
                 "destinationId": dest_id,
             }
 
@@ -759,6 +824,7 @@ def cmd_apply(
     state_file: Path,
     env_file_override: Path | None = None,
 ) -> None:
+    """Run check, setup, env, reconcile, and trigger; exit 1 if any reconcile step failed."""
     print("\n==> Phase 1/4: check")
     cmd_check(repo_root)
 
@@ -779,25 +845,64 @@ def cmd_apply(
     print("\n==> Phase 3/4: env")
     cmd_env(client, cfg, state_file, repo_root, env_file_override=env_file_override)
 
+    failures: list[str] = []
     if is_redeploy:
-        cleanup_orphans(client, cfg, load_state(state_file))
-        reconcile_registries(client, cfg, load_state(state_file), state_file)
-        reconcile_destinations(client, cfg, load_state(state_file), state_file)
-        reconcile_certificates(client, cfg, load_state(state_file), state_file, repo_root=repo_root)
-        reconcile_app_registry(client, cfg, load_state(state_file))
-        reconcile_app_domains(client, cfg, load_state(state_file), state_file)
-        reconcile_app_schedules(client, cfg, load_state(state_file), state_file)
-        reconcile_app_mounts(client, cfg, load_state(state_file), state_file)
-        reconcile_app_ports(client, cfg, load_state(state_file), state_file)
-        reconcile_app_security(client, cfg, load_state(state_file), state_file)
-        reconcile_app_redirects(client, cfg, load_state(state_file), state_file)
-        reconcile_app_settings(client, cfg, load_state(state_file))
-        reconcile_databases(client, cfg, load_state(state_file), state_file)
-        reconcile_database_backups(client, cfg, load_state(state_file), state_file)
-        reconcile_volume_backups(client, cfg, load_state(state_file), state_file)
+        failures = _run_reconcile_phases(client, cfg, state_file, repo_root)
+        if failures:
+            print("\nReconcile failures above; continuing to the deploy trigger so the rest still converges.")
 
     print("\n==> Phase 4/4: trigger")
     cmd_trigger(client, cfg, state_file, repo_root=repo_root, env_file_override=env_file_override, redeploy=is_redeploy)
+
+    if failures:
+        print(f"\nERROR: {len(failures)} reconcile step(s) failed: {', '.join(failures)}")
+        print("The panel is only partially converged. Fix the cause and run apply again.")
+        sys.exit(1)
+
+
+def _reconcile_phases(
+    client: DokployClient, cfg: dict, state_file: Path, repo_root: Path | None
+) -> list[tuple[str, Callable[[], None]]]:
+    """Return the redeploy reconcile steps as (label, callable) pairs.
+
+    Each callable re-loads state so one step's writes are visible to the next and
+    a failure in one step cannot hand a half-mutated dict to the rest.
+    """
+    return [
+        ("cleanup orphans", lambda: cleanup_orphans(client, cfg, load_state(state_file))),
+        ("registries", lambda: reconcile_registries(client, cfg, load_state(state_file), state_file)),
+        ("destinations", lambda: reconcile_destinations(client, cfg, load_state(state_file), state_file)),
+        ("certificates", lambda: reconcile_certificates(client, cfg, load_state(state_file), state_file, repo_root=repo_root)),
+        ("app registry", lambda: reconcile_app_registry(client, cfg, load_state(state_file))),
+        ("domains", lambda: reconcile_app_domains(client, cfg, load_state(state_file), state_file)),
+        ("schedules", lambda: reconcile_app_schedules(client, cfg, load_state(state_file), state_file)),
+        ("mounts", lambda: reconcile_app_mounts(client, cfg, load_state(state_file), state_file)),
+        ("ports", lambda: reconcile_app_ports(client, cfg, load_state(state_file), state_file)),
+        ("security", lambda: reconcile_app_security(client, cfg, load_state(state_file), state_file)),
+        ("redirects", lambda: reconcile_app_redirects(client, cfg, load_state(state_file), state_file)),
+        ("app settings", lambda: reconcile_app_settings(client, cfg, load_state(state_file))),
+        ("databases", lambda: reconcile_databases(client, cfg, load_state(state_file), state_file)),
+        ("database backups", lambda: reconcile_database_backups(client, cfg, load_state(state_file), state_file)),
+        ("volume backups", lambda: reconcile_volume_backups(client, cfg, load_state(state_file), state_file)),
+    ]
+
+
+def _run_reconcile_phases(client: DokployClient, cfg: dict, state_file: Path, repo_root: Path | None) -> list[str]:
+    """Run every reconcile step, collecting the labels of the ones that failed.
+
+    A bookkeeping failure in one step must not abandon the steps after it or the
+    deploy trigger, or the panel silently converges only halfway. SystemExit is
+    deliberately not caught: the registry and destination connection tests abort
+    loudly on purpose.
+    """
+    failures: list[str] = []
+    for label, step in _reconcile_phases(client, cfg, state_file, repo_root):
+        try:
+            step()
+        except Exception as exc:
+            print(f"ERROR: reconcile step '{label}' failed: {type(exc).__name__}: {exc}")
+            failures.append(label)
+    return failures
 
 
 def cmd_status(client: DokployClient, state_file: Path) -> None:

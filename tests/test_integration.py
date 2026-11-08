@@ -279,14 +279,33 @@ def _setup_router(
     ):
         router.post(f"{BASE_URL}/api/{endpoint}").mock(return_value=httpx.Response(200, json={}))
 
-    # redirects.create needs a redirectId in the response
+    # redirects.create answers with a bare `true` on real Dokploy (verified against
+    # v0.30.10 and v0.31.0 upstream), so icarus has to recover the id by re-reading
+    # the application. The mock replays that behaviour, rows and all.
+    redirects_by_app: dict[str, list[dict]] = {}
     redirect_counter = {"n": 0}
 
     def _create_redirect(request):
+        body = json.loads(request.content)
         redirect_counter["n"] += 1
-        return httpx.Response(200, json={"redirectId": f"redirect-{redirect_counter['n']:03d}"})
+        redirect = {
+            "redirectId": f"redirect-{redirect_counter['n']:03d}",
+            "regex": body["regex"],
+            "replacement": body["replacement"],
+            "permanent": body["permanent"],
+        }
+        redirects_by_app.setdefault(body["applicationId"], []).append(redirect)
+        return httpx.Response(200, json=True)
 
     router.post(f"{BASE_URL}/api/redirects.create").mock(side_effect=_create_redirect)
+
+    def _application_one(request):
+        app_id = request.url.params["applicationId"]
+        return httpx.Response(200, json={"applicationId": app_id, "redirects": redirects_by_app.get(app_id, [])})
+
+    router.get(f"{BASE_URL}/api/application.one").mock(side_effect=_application_one)
+
+    ids["redirects"] = redirects_by_app
 
     return ids
 
@@ -325,6 +344,25 @@ class TestCmdSetup:
         assert len(state["apps"]) == 5
         for name in ("redis", "web", "worker", "beat", "flower"):
             assert name in state["apps"]
+
+    def test_redirect_id_recovered_when_create_returns_true(self, tmp_path, web_app_config):
+        """redirects.create replies with a bare `true`, so setup recovers the real id from application.one."""
+        router = respx.Router()
+        ids = _setup_router(
+            router,
+            with_github=True,
+            github_owner="your-org",
+            app_names=["redis", "web", "worker", "beat", "flower"],
+        )
+        client = _make_client(router)
+
+        state_file = tmp_path / ".dokploy-state" / "test.json"
+        dokploy.cmd_setup(client, web_app_config, state_file)
+
+        state = json.loads(state_file.read_text())
+        app_id = state["apps"]["web"]["applicationId"]
+        recorded = state["apps"]["web"]["redirects"]["^/blog$"]["redirectId"]
+        assert recorded in {r["redirectId"] for r in ids["redirects"][app_id]}
 
     def test_state_file_already_exists(self, tmp_path, minimal_config):
         """Exits with error when state file already exists."""
@@ -972,11 +1010,14 @@ class TestFullPipeline:
 
         def _app_one(request):
             params = dict(request.url.params)
+            app_id = params.get("applicationId", "")
             return httpx.Response(
                 200,
                 json={
-                    "applicationId": params.get("applicationId", ""),
+                    "applicationId": app_id,
                     "applicationStatus": "running",
+                    # redirects.create answers `true`, so setup reads these rows back
+                    "redirects": ids["redirects"].get(app_id, []),
                 },
             )
 

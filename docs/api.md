@@ -84,6 +84,30 @@ Requires the `x-api-key` header.
 
 - **`volumeBackups.delete`/`.runManually`**: POST with `{"volumeBackupId": "..."}`. `runManually` triggers an on-demand run outside the cron schedule, exposed via `ic backup <resource> --volume <name>`.
 
+## Create Response Shapes
+
+Dokploy's create endpoints do not agree on what they return, and the OpenAPI spec is no help: it types every create `200` as an untyped object. The shapes below were read from the upstream handlers (`apps/dokploy/server/api/routers/*`, verified on v0.30.10 and v0.31.0). Anything that is not a plain object would crash a naive `resp["<id>"]`, so every create goes through `create_and_get_id` / `created_row` (`src/icarus/client.py`): they take the id from the response when it is there, otherwise re-read the parent and match the row on the listed keys. When neither works they raise `CreateIdError` naming the endpoint, rather than raising `TypeError` from a `bool` subscript.
+
+| Endpoint                    | Raw response                               | Recovery read (match keys)                                   |
+| --------------------------- | ------------------------------------------ | ------------------------------------------------------------ |
+| `redirects.create`          | `true`                                     | `application.one` `redirects[]` (regex)                      |
+| `security.create`           | `true`                                     | `application.one` `security[]` (username)                    |
+| `backup.create`             | empty body                                 | `backup.all` (prefix)                                        |
+| `mounts.create`             | created row                                | `application.one` `mounts[]` (mountPath)                     |
+| `port.create`               | created row                                | `application.one` `ports[]` (publishedPort, targetPort)      |
+| `schedule.create`           | created row                                | `schedule.list` (name)                                       |
+| `domain.create`             | created row                                | `domain.byApplicationId` / `domain.byComposeId` (host, path) |
+| `registry.create`           | created row                                | `registry.all` (registryName)                                |
+| `destination.create`        | created row                                | `destination.all` (name)                                     |
+| `certificates.create`       | created row                                | `certificates.all` (name)                                    |
+| `volumeBackups.create`      | created row                                | `volumeBackups.list` (name)                                  |
+| `application.create`        | created row                                | none (needs `appName`, no flat parent read)                  |
+| `compose.create`            | created row                                | none (needs `appName`, no flat parent read)                  |
+| `<type>.create` (databases) | created row                                | none (needs `appName`, no flat parent read)                  |
+| `project.create`            | `{"project": {...}, "environment": {...}}` | nested ids read directly                                     |
+
+The recovery read is cheap insurance for the endpoints that do return a row: a create that succeeded but answered `null` (or a row missing its id) still converges instead of leaving an untracked resource behind. `libsql.create` also answers `true`, but icarus has no libsql support. Domain matching only compares `path` when it is not the root `/`, because Dokploy stores a missing `path` as `"/"` while a create that omits it means the same thing.
+
 ## Non-goals
 
 icarus is a declarative deploy tool (`dokploy.yml` + reconcile), not a 1:1 wrapper around the Dokploy API. The official `@dokploy/cli` covers all 449 endpoints across 45 groups; icarus deliberately does not wrap the panel-admin and imperative groups below. This boundary is intentional, not a coverage gap.

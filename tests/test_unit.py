@@ -8312,3 +8312,445 @@ class TestGitProviderArgparse:
         parser = self._build_parser()
         with pytest.raises(SystemExit):
             parser.parse_args(["git-provider", "remove"])
+
+
+class TestCreatedRow:
+    """created_row/create_and_get_id handle every shape a Dokploy create endpoint returns.
+
+    Upstream v0.30.10 and v0.31.0 reply with a bare ``true`` to ``redirects.create``
+    and ``security.create``, and with nothing at all to ``backup.create``. The
+    integration mocks used to hand back a well-formed object, which is why the
+    suite never caught the resulting TypeError on a first create.
+    """
+
+    @staticmethod
+    def _client(rows: dict | None = None) -> MagicMock:
+        client = MagicMock()
+        client.get.side_effect = lambda endpoint, params=None: (rows or {}).get(endpoint, [])
+        return client
+
+    @staticmethod
+    def _redirect_lookup() -> dict:
+        return {
+            "read_endpoint": "application.one",
+            "read_params": {"applicationId": "app-1"},
+            "read_container": "redirects",
+            "match": {"regex": "^/old$"},
+        }
+
+    def test_object_response_short_circuits_the_read(self):
+        client = self._client()
+        row = dokploy.created_row(client, "redirects.create", {"redirectId": "r-1"}, "redirectId", **self._redirect_lookup())
+        assert row == {"redirectId": "r-1"}
+        client.get.assert_not_called()
+
+    @pytest.mark.parametrize("resp", [True, None, {}, {"success": True}, {"redirectId": ""}, {"redirectId": 42}])
+    def test_response_without_a_usable_id_falls_back_to_the_read(self, resp):
+        client = self._client(
+            {
+                "application.one": {
+                    "redirects": [
+                        {"redirectId": "r-other", "regex": "^/keep$"},
+                        {"redirectId": "r-9", "regex": "^/old$"},
+                    ]
+                }
+            }
+        )
+        row = dokploy.created_row(client, "redirects.create", resp, "redirectId", **self._redirect_lookup())
+        assert row["redirectId"] == "r-9"
+        client.get.assert_called_once_with("application.one", {"applicationId": "app-1"})
+
+    def test_list_rows_match_without_a_container(self):
+        client = self._client(
+            {"certificates.all": [{"certificateId": "c-other", "name": "other"}, {"certificateId": "c-1", "name": "wildcard"}]}
+        )
+        row = dokploy.created_row(
+            client,
+            "certificates.create",
+            True,
+            "certificateId",
+            read_endpoint="certificates.all",
+            match={"name": "wildcard"},
+        )
+        assert row["certificateId"] == "c-1"
+
+    def test_no_lookup_configured_raises_naming_the_endpoint(self):
+        client = self._client()
+        with pytest.raises(dokploy.CreateIdError, match="certificates.create"):
+            dokploy.created_row(client, "certificates.create", True, "certificateId")
+
+    def test_unmatched_rows_raise_naming_endpoint_and_read(self):
+        client = self._client({"application.one": {"redirects": [{"redirectId": "r-1", "regex": "^/other$"}]}})
+        with pytest.raises(dokploy.CreateIdError) as excinfo:
+            dokploy.created_row(client, "redirects.create", True, "redirectId", **self._redirect_lookup())
+        message = str(excinfo.value)
+        assert "redirects.create" in message
+        assert "application.one" in message
+        assert "regex" in message
+
+    def test_empty_match_never_returns_the_first_row(self):
+        client = self._client({"application.one": {"redirects": [{"redirectId": "r-1", "regex": "^/other$"}]}})
+        with pytest.raises(dokploy.CreateIdError, match="redirects.create"):
+            dokploy.created_row(
+                client,
+                "redirects.create",
+                True,
+                "redirectId",
+                read_endpoint="application.one",
+                read_container="redirects",
+                match={},
+            )
+
+    def test_non_list_read_response_raises_instead_of_crashing(self):
+        client = self._client({"application.one": None})
+        with pytest.raises(dokploy.CreateIdError, match="redirects.create"):
+            dokploy.created_row(client, "redirects.create", True, "redirectId", **self._redirect_lookup())
+
+    def test_create_and_get_id_posts_then_returns_the_id(self):
+        client = self._client({"application.one": {"redirects": [{"redirectId": "r-9", "regex": "^/old$"}]}})
+        client.post.return_value = True
+        redirect_id = dokploy.create_and_get_id(
+            client,
+            "redirects.create",
+            {"applicationId": "app-1", "regex": "^/old$"},
+            "redirectId",
+            **self._redirect_lookup(),
+        )
+        assert redirect_id == "r-9"
+        client.post.assert_called_once_with("redirects.create", {"applicationId": "app-1", "regex": "^/old$"})
+
+
+class TestReconcileToleratesBooleanCreates:
+    """Reconcilers record the real id even when the create endpoint answers ``true``."""
+
+    @pytest.mark.parametrize(
+        ("label", "rows", "expected_id", "run"),
+        [
+            (
+                "schedule",
+                {"schedule.list": [{"scheduleId": "sch-1", "name": "nightly"}]},
+                "sch-1",
+                lambda client: dokploy.reconcile_schedules(
+                    client,
+                    "app-1",
+                    [],
+                    [{"name": "nightly", "cronExpression": "0 0 * * *", "command": "echo hi"}],
+                ),
+            ),
+            (
+                "mount",
+                {"application.one": {"mounts": [{"mountId": "m-1", "mountPath": "/data"}]}},
+                "m-1",
+                lambda client: dokploy.reconcile_mounts(
+                    client,
+                    "app-1",
+                    [],
+                    [{"type": "volume", "target": "/data", "source": "data-vol"}],
+                ),
+            ),
+            (
+                "port",
+                {"application.one": {"ports": [{"portId": "p-1", "publishedPort": 8080}]}},
+                "p-1",
+                lambda client: dokploy.reconcile_ports(client, "app-1", [], [{"publishedPort": 8080, "targetPort": 80}]),
+            ),
+            (
+                "redirect",
+                {"application.one": {"redirects": [{"redirectId": "r-1", "regex": "^/old$"}]}},
+                "r-1",
+                lambda client: dokploy.reconcile_redirects(
+                    client,
+                    "app-1",
+                    [],
+                    [{"regex": "^/old$", "replacement": "/new", "permanent": True}],
+                ),
+            ),
+            (
+                "security",
+                {"application.one": {"security": [{"securityId": "sec-1", "username": "admin"}]}},
+                "sec-1",
+                lambda client: dokploy.reconcile_security(client, "app-1", [], [{"username": "admin", "password": "pw"}]),
+            ),
+            (
+                "domain",
+                {"domain.byApplicationId": [{"domainId": "d-1", "host": "www.example.com"}]},
+                "d-1",
+                lambda client: dokploy.reconcile_domains(
+                    client,
+                    "app-1",
+                    [],
+                    [{"host": "www.example.com", "port": "80", "https": False, "certificateType": "none"}],
+                ),
+            ),
+            (
+                "domain with path",
+                {
+                    "domain.byApplicationId": [
+                        {"domainId": "d-root", "host": "example.com"},
+                        {"domainId": "d-3", "host": "example.com", "path": "/docs"},
+                    ]
+                },
+                "d-3",
+                lambda client: dokploy.reconcile_domains(
+                    client,
+                    "app-1",
+                    [],
+                    [{"host": "example.com", "path": "/docs", "port": "80", "https": False, "certificateType": "none"}],
+                ),
+            ),
+            (
+                "compose domain",
+                {"domain.byComposeId": [{"domainId": "d-2", "host": "api.example.com"}]},
+                "d-2",
+                lambda client: dokploy.reconcile_domains(
+                    client,
+                    "cmp-1",
+                    [],
+                    [
+                        {
+                            "host": "api.example.com",
+                            "serviceName": "api",
+                            "port": "80",
+                            "https": False,
+                            "certificateType": "none",
+                        }
+                    ],
+                    compose=True,
+                ),
+            ),
+        ],
+        ids=lambda value: value if isinstance(value, str) else "",
+    )
+    def test_boolean_create_still_records_the_id(self, label, rows, expected_id, run):
+        client = MagicMock()
+        client.post.return_value = True
+        client.get.side_effect = lambda endpoint, params=None: rows.get(endpoint, [])
+
+        state = run(client)
+
+        assert expected_id in json.dumps(state), f"{label}: recovered id missing from {state}"
+
+    def test_registry_create_returning_true_recovers_the_id(self):
+        client = MagicMock()
+        client.post.return_value = True
+        client.get.side_effect = lambda endpoint, params=None: {
+            "registry.all": [{"registryId": "reg-1", "registryName": "ghcr"}]
+        }.get(endpoint, [])
+        cfg = {
+            "registries": [
+                {
+                    "name": "ghcr",
+                    "username": "u",
+                    "password": "p",
+                    "registryUrl": "ghcr.io",
+                }
+            ]
+        }
+        state = {"registries": {}}
+
+        dokploy.reconcile_registries(client, cfg, state, MagicMock())
+
+        assert state["registries"]["ghcr"]["registryId"] == "reg-1"
+
+    def test_destination_create_returning_true_recovers_the_id(self):
+        client = MagicMock()
+        client.post.return_value = True
+        client.get.side_effect = lambda endpoint, params=None: {
+            "destination.all": [{"destinationId": "dest-1", "name": "s3"}]
+        }.get(endpoint, [])
+        cfg = {
+            "destinations": [
+                {
+                    "name": "s3",
+                    "accessKey": "k",
+                    "secretAccessKey": "s",
+                    "bucket": "b",
+                    "region": "r",
+                    "endpoint": "e",
+                }
+            ]
+        }
+        state = {"destinations": {}}
+
+        dokploy.reconcile_destinations(client, cfg, state, MagicMock())
+
+        assert state["destinations"]["s3"]["destinationId"] == "dest-1"
+
+    def test_certificate_create_returning_true_recovers_the_id(self, tmp_path):
+        client = MagicMock()
+        client.post.return_value = True
+        client.get.side_effect = lambda endpoint, params=None: {
+            "certificates.all": [{"certificateId": "cert-1", "name": "wildcard"}]
+        }.get(endpoint, [])
+        cfg = {"certificates": [{"name": "wildcard", "certFile": "cert.pem", "keyFile": "key.pem"}]}
+        (tmp_path / "cert.pem").write_text("CERT")
+        (tmp_path / "key.pem").write_text("KEY")
+        state = {"certificates": {}, "organizationId": "org-1"}
+
+        dokploy.reconcile_certificates(client, cfg, state, MagicMock(), repo_root=tmp_path)
+
+        assert state["certificates"]["wildcard"]["certificateId"] == "cert-1"
+
+    def test_backup_create_returning_nothing_recovers_the_id(self):
+        """backup.create has no return statement upstream, so the body is empty."""
+        client = MagicMock()
+        client.post.return_value = {}
+        client.get.side_effect = lambda endpoint, params=None: {"backup.all": [{"backupId": "bk-1", "prefix": "daily"}]}.get(
+            endpoint, []
+        )
+        cfg = {
+            "database": [
+                {
+                    "name": "mydb",
+                    "type": "postgres",
+                    "databaseName": "myapp",
+                    "databaseUser": "u",
+                    "databasePassword": "p",
+                    "backups": [
+                        {
+                            "schedule": "0 0 * * *",
+                            "prefix": "daily",
+                            "destination": "s3",
+                        }
+                    ],
+                }
+            ],
+        }
+        state = {
+            "database": {"mydb": {"postgresId": "pg-1", "appName": "mydb-app", "type": "postgres"}},
+            "destinations": {"s3": {"destinationId": "dest-1"}},
+        }
+
+        dokploy.reconcile_database_backups(client, cfg, state, MagicMock())
+
+        assert state["database"]["mydb"]["backups"]["daily"]["backupId"] == "bk-1"
+
+    def test_volume_backup_create_returning_true_recovers_the_id(self):
+        client = MagicMock()
+        client.post.return_value = True
+        client.get.side_effect = lambda endpoint, params=None: {
+            "volumeBackups.list": [{"volumeBackupId": "vb-1", "name": "pg-data"}]
+        }.get(endpoint, [])
+        cfg = {
+            "database": [
+                {
+                    "name": "mydb",
+                    "type": "postgres",
+                    "databaseName": "myapp",
+                    "databaseUser": "u",
+                    "databasePassword": "p",
+                    "volumeBackups": [
+                        {
+                            "name": "pg-data",
+                            "volumeName": "postgres_data",
+                            "prefix": "pg-vol",
+                            "cronExpression": "0 3 * * *",
+                            "destination": "s3",
+                        }
+                    ],
+                }
+            ],
+        }
+        state = {"database": {"mydb": {"postgresId": "pg-1", "appName": "mydb-app", "type": "postgres"}}, "destinations": {}}
+
+        dokploy.reconcile_volume_backups(client, cfg, state, MagicMock())
+
+        assert state["database"]["mydb"]["volumeBackups"]["pg-data"]["volumeBackupId"] == "vb-1"
+
+    def test_unrecoverable_id_reports_the_endpoint_instead_of_a_traceback(self):
+        client = MagicMock()
+        client.post.return_value = True
+        client.get.return_value = []
+        cfg = {"registries": [{"name": "ghcr", "username": "u", "password": "p", "registryUrl": "ghcr.io"}]}
+        state = {"registries": {}}
+
+        with pytest.raises(dokploy.CreateIdError, match="registry.create"):
+            dokploy.reconcile_registries(client, cfg, state, MagicMock())
+
+
+class TestCmdApplyReconcileFailureIsolation:
+    """A reconcile step that raises must not abandon the remaining steps or the trigger."""
+
+    def _patch_phases(self, monkeypatch, calls):
+        monkeypatch.setattr(icarus_commands, "cmd_check", lambda repo_root: None)
+        monkeypatch.setattr(icarus_commands, "cmd_setup", lambda client, cfg, sf, repo_root=None: None)
+        monkeypatch.setattr(icarus_commands, "cmd_env", lambda client, cfg, sf, repo_root, env_file_override=None: None)
+        monkeypatch.setattr(
+            icarus_commands,
+            "cmd_trigger",
+            lambda client, cfg, sf, repo_root=None, env_file_override=None, redeploy=False: calls.append("trigger"),
+        )
+        monkeypatch.setattr(icarus_commands, "validate_state", lambda client, state: True)
+        monkeypatch.setattr(icarus_commands, "cleanup_orphans", lambda client, cfg, state, dry_run=False: calls.append("cleanup"))
+
+    def _state_file(self, tmp_path):
+        state_file = tmp_path / ".dokploy-state" / "prod.json"
+        state_file.parent.mkdir(parents=True)
+        state_file.write_text(json.dumps({"apps": {}, "database": {}}))
+        return state_file
+
+    def test_failure_does_not_skip_later_steps_or_the_trigger(self, tmp_path, monkeypatch):
+        calls = []
+        self._patch_phases(monkeypatch, calls)
+
+        def boom(*args, **kwargs):
+            raise RuntimeError("bookkeeping exploded")
+
+        monkeypatch.setattr(icarus_commands, "reconcile_app_domains", boom)
+        monkeypatch.setattr(
+            icarus_commands,
+            "reconcile_app_redirects",
+            lambda client, cfg, state, sf: calls.append("redirects"),
+        )
+        monkeypatch.setattr(
+            icarus_commands,
+            "reconcile_volume_backups",
+            lambda client, cfg, state, sf: calls.append("volume_backups"),
+        )
+
+        with pytest.raises(SystemExit) as excinfo:
+            dokploy.cmd_apply(
+                repo_root=tmp_path,
+                client="fake-client",
+                cfg={"project": {}},
+                state_file=self._state_file(tmp_path),
+            )
+
+        assert excinfo.value.code == 1
+        assert "trigger" in calls
+        assert "redirects" in calls
+        assert "volume_backups" in calls
+        assert calls.index("trigger") > calls.index("redirects")
+
+    def test_clean_redeploy_does_not_exit(self, tmp_path, monkeypatch):
+        calls = []
+        self._patch_phases(monkeypatch, calls)
+
+        dokploy.cmd_apply(
+            repo_root=tmp_path,
+            client="fake-client",
+            cfg={"project": {}},
+            state_file=self._state_file(tmp_path),
+        )
+
+        assert calls == ["cleanup", "trigger"]
+
+    def test_system_exit_still_aborts_before_the_trigger(self, tmp_path, monkeypatch):
+        """A deliberate abort (failed registry connection test) is not swallowed."""
+        calls = []
+        self._patch_phases(monkeypatch, calls)
+
+        def abort(*args, **kwargs):
+            raise SystemExit("ERROR: Registry connection test failed")
+
+        monkeypatch.setattr(icarus_commands, "reconcile_registries", abort)
+
+        with pytest.raises(SystemExit, match="Registry connection test failed"):
+            dokploy.cmd_apply(
+                repo_root=tmp_path,
+                client="fake-client",
+                cfg={"project": {}},
+                state_file=self._state_file(tmp_path),
+            )
+
+        assert "trigger" not in calls
