@@ -202,6 +202,162 @@ def cmd_check(repo_root: Path) -> None:
         sys.exit(1)
 
 
+def _make_server_resolver(client: DokployClient):
+    """Return a cached server-name -> serverId lookup."""
+    cache: dict[str, str] = {}
+
+    def resolve_server_id(server_name: str) -> str:
+        if server_name not in cache:
+            for s in client.get("server.all"):
+                cache[s["name"]] = s["serverId"]
+        server_id = cache.get(server_name)
+        if not server_id:
+            raise SystemExit(f"Server '{server_name}' not found in Dokploy. Check Settings → Servers.")
+        return server_id
+
+    return resolve_server_id
+
+
+def _create_app(client: DokployClient, app_def: dict, environment_id: str, resolve_server_id, state: dict) -> None:
+    """Create one application or compose resource and record it in state."""
+    name = app_def["name"]
+    server_name = app_def.get("server")
+    server_id = resolve_server_id(server_name) if server_name else None
+    if is_compose(app_def):
+        print(f"Creating compose: {name}...")
+        payload: dict = {
+            "name": name,
+            "environmentId": environment_id,
+            "composeType": app_def.get("composeType", "docker-compose"),
+        }
+        if server_id:
+            payload["serverId"] = server_id
+        result = client.post("compose.create", payload)
+        compose_row = created_row(client, "compose.create", result, "composeId")
+        compose_id = compose_row["composeId"]
+        app_name = compose_row["appName"]
+        state["apps"][name] = {"composeId": compose_id, "appName": app_name, "source": "compose"}
+        print(f"  {name}: id={compose_id} appName={app_name}")
+        return
+    print(f"Creating app: {name}...")
+    payload = {"name": name, "environmentId": environment_id}
+    if server_id:
+        payload["serverId"] = server_id
+    result = client.post("application.create", payload)
+    app_row = created_row(client, "application.create", result, "applicationId")
+    app_id = app_row["applicationId"]
+    app_name = app_row["appName"]
+    state["apps"][name] = {"applicationId": app_id, "appName": app_name}
+    print(f"  {name}: id={app_id} appName={app_name}")
+
+
+def _configure_app_source(
+    client: DokployClient,
+    app_def: dict,
+    state: dict,
+    github_cfg: dict | None,
+    github_id: str | None,
+    effective_root: Path,
+) -> None:
+    """Push the source provider (compose, Docker or GitHub) and registry for one app."""
+    name = app_def["name"]
+
+    if is_compose(app_def):
+        compose_id = state["apps"][name]["composeId"]
+        source_type = app_def.get("sourceType", "raw")
+        print(f"Pushing compose source ({source_type}) for {name}...")
+        client.post(
+            "compose.update",
+            build_compose_update_payload(compose_id, app_def, github_cfg, github_id, effective_root),
+        )
+        return
+
+    app_id = state["apps"][name]["applicationId"]
+
+    if app_def["source"] == "docker":
+        print(f"Configuring Docker provider for {name}...")
+        client.post(
+            "application.saveDockerProvider",
+            {
+                "applicationId": app_id,
+                "dockerImage": app_def["dockerImage"],
+                "username": None,
+                "password": None,
+                "registryUrl": None,
+            },
+        )
+    elif app_def["source"] == "github":
+        assert github_cfg is not None
+        print(f"Configuring GitHub provider for {name}...")
+        provider_payload = build_github_provider_payload(app_id, app_def, github_cfg, github_id)
+        client.post("application.saveGithubProvider", provider_payload)
+
+        build_type = app_def.get("buildType", "dockerfile")
+        print(f"  Setting buildType={build_type} for {name}...")
+        build_payload = build_build_type_payload(app_id, app_def)
+        client.post("application.saveBuildType", build_payload)
+
+    registry_name = app_def.get("registry")
+    if registry_name:
+        registry_id = resolve_registry_id(state, registry_name)
+        if not registry_id:
+            print(f"ERROR: App '{name}' references unknown registry '{registry_name}'")
+            sys.exit(1)
+        print(f"  Associating registry '{registry_name}' with {name}...")
+        client.post("application.update", {"applicationId": app_id, "registryId": registry_id})
+
+
+def _set_command_override(client: DokployClient, app_def: dict, state: dict) -> None:
+    """Set the command override for one application, resolving {ref} placeholders."""
+    if is_compose(app_def):
+        return
+    command = app_def.get("command")
+    if not command:
+        return
+    name = app_def["name"]
+    print(f"Setting command override for {name}...")
+    client.post(
+        "application.update",
+        {"applicationId": state["apps"][name]["applicationId"], "command": resolve_refs(command, state)},
+    )
+
+
+def cmd_add_missing_apps(
+    client: DokployClient,
+    cfg: dict,
+    state_file: Path,
+    repo_root: Path | None = None,
+) -> list[str]:
+    """Create apps that are in the config but not in the state file; return their names.
+
+    Domains, mounts, ports and the other per-app resources are left to the reconcile steps that follow.
+    """
+    state = load_state(state_file)
+    missing = [app_def for app_def in cfg.get("apps", []) if app_def["name"] not in state["apps"]]
+    if not missing:
+        return []
+
+    github_cfg = cfg.get("github")
+    github_id = None
+    if github_cfg and any(a.get("source") == "github" or is_compose(a) for a in missing):
+        providers = client.get("github.githubProviders")
+        if not providers:
+            print("ERROR: No GitHub provider found. Configure one in Dokploy UI first.")
+            sys.exit(1)
+        github_id = resolve_github_provider(client, providers, github_cfg["owner"])
+
+    resolve_server_id = _make_server_resolver(client)
+    effective_root = repo_root or state_file.parent.parent
+    for app_def in missing:
+        _create_app(client, app_def, state["environmentId"], resolve_server_id, state)
+    save_state(state, state_file, quiet=True)
+    for app_def in missing:
+        _configure_app_source(client, app_def, state, github_cfg, github_id, effective_root)
+    for app_def in missing:
+        _set_command_override(client, app_def, state)
+    return [app_def["name"] for app_def in missing]
+
+
 def cmd_setup(client: DokployClient, cfg: dict, state_file: Path, repo_root: Path | None = None) -> None:
     if state_file.exists():
         print(f"ERROR: State file already exists: {state_file}")
@@ -324,127 +480,23 @@ def cmd_setup(client: DokployClient, cfg: dict, state_file: Path, repo_root: Pat
                 print(f"  Certificate created: {certificate_id}")
             state["certificates"][name] = {"certificateId": certificate_id}
 
-    # 3. Build server name -> ID lookup (populated lazily, cached for the loop)
-    _server_cache: dict[str, str] = {}
-
-    def resolve_server_id(server_name: str) -> str:
-        if server_name not in _server_cache:
-            servers = client.get("server.all")
-            for s in servers:
-                _server_cache[s["name"]] = s["serverId"]
-        server_id = _server_cache.get(server_name)
-        if not server_id:
-            raise SystemExit(f"Server '{server_name}' not found in Dokploy. Check Settings → Servers.")
-        return server_id
+    resolve_server_id = _make_server_resolver(client)
+    effective_root = repo_root or state_file.parent.parent
 
     # 3. Create apps
     for app_def in cfg["apps"]:
-        name = app_def["name"]
-        server_name = app_def.get("server")
-        server_id = resolve_server_id(server_name) if server_name else None
-        if is_compose(app_def):
-            print(f"Creating compose: {name}...")
-            compose_type = app_def.get("composeType", "docker-compose")
-            payload: dict = {
-                "name": name,
-                "environmentId": environment_id,
-                "composeType": compose_type,
-            }
-            if server_id:
-                payload["serverId"] = server_id
-            result = client.post("compose.create", payload)
-            compose_row = created_row(client, "compose.create", result, "composeId")
-            compose_id = compose_row["composeId"]
-            app_name = compose_row["appName"]
-            state["apps"][name] = {
-                "composeId": compose_id,
-                "appName": app_name,
-                "source": "compose",
-            }
-            print(f"  {name}: id={compose_id} appName={app_name}")
-        else:
-            print(f"Creating app: {name}...")
-            payload = {"name": name, "environmentId": environment_id}
-            if server_id:
-                payload["serverId"] = server_id
-            result = client.post(
-                "application.create",
-                payload,
-            )
-            app_row = created_row(client, "application.create", result, "applicationId")
-            app_id = app_row["applicationId"]
-            app_name = app_row["appName"]
-            state["apps"][name] = {"applicationId": app_id, "appName": app_name}
-            print(f"  {name}: id={app_id} appName={app_name}")
+        _create_app(client, app_def, environment_id, resolve_server_id, state)
 
     # Save state early so destroy can clean up if later steps fail
     save_state(state, state_file, quiet=True)
 
     # 4. Configure providers
     for app_def in cfg["apps"]:
-        name = app_def["name"]
-
-        if is_compose(app_def):
-            compose_id = state["apps"][name]["composeId"]
-            effective_root = repo_root or state_file.parent.parent
-            source_type = app_def.get("sourceType", "raw")
-            print(f"Pushing compose source ({source_type}) for {name}...")
-            client.post(
-                "compose.update",
-                build_compose_update_payload(compose_id, app_def, github_cfg, github_id, effective_root),
-            )
-            continue
-
-        app_id = state["apps"][name]["applicationId"]
-
-        if app_def["source"] == "docker":
-            print(f"Configuring Docker provider for {name}...")
-            client.post(
-                "application.saveDockerProvider",
-                {
-                    "applicationId": app_id,
-                    "dockerImage": app_def["dockerImage"],
-                    "username": None,
-                    "password": None,
-                    "registryUrl": None,
-                },
-            )
-        elif app_def["source"] == "github":
-            assert github_cfg is not None
-            print(f"Configuring GitHub provider for {name}...")
-            provider_payload = build_github_provider_payload(app_id, app_def, github_cfg, github_id)
-            client.post("application.saveGithubProvider", provider_payload)
-
-            build_type = app_def.get("buildType", "dockerfile")
-            print(f"  Setting buildType={build_type} for {name}...")
-            build_payload = build_build_type_payload(app_id, app_def)
-            client.post("application.saveBuildType", build_payload)
-
-        # Associate registry if specified
-        registry_name = app_def.get("registry")
-        if registry_name:
-            registry_id = resolve_registry_id(state, registry_name)
-            if not registry_id:
-                print(f"ERROR: App '{name}' references unknown registry '{registry_name}'")
-                sys.exit(1)
-            print(f"  Associating registry '{registry_name}' with {name}...")
-            client.post("application.update", {"applicationId": app_id, "registryId": registry_id})
+        _configure_app_source(client, app_def, state, github_cfg, github_id, effective_root)
 
     # 5. Command overrides (resolve {ref} placeholders)
     for app_def in cfg["apps"]:
-        name = app_def["name"]
-        if is_compose(app_def):
-            continue
-        command = app_def.get("command")
-        if not command:
-            continue
-        resolved = resolve_refs(command, state)
-        app_id = state["apps"][name]["applicationId"]
-        print(f"Setting command override for {name}...")
-        client.post(
-            "application.update",
-            {"applicationId": app_id, "command": resolved},
-        )
+        _set_command_override(client, app_def, state)
 
     # 6. Domains
     for app_def in cfg["apps"]:
@@ -832,7 +884,8 @@ def cmd_apply(
     if state_file.exists():
         state = load_state(state_file)
         if validate_state(client, state):
-            print("\n==> Phase 2/4: setup (skipped, state file exists)")
+            print("\n==> Phase 2/4: setup (state file exists, adding apps missing from it)")
+            cmd_add_missing_apps(client, cfg, state_file, repo_root)
             is_redeploy = True
         else:
             print("\n==> Phase 2/4: setup (state orphaned, recreating)")

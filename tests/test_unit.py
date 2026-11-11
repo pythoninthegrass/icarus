@@ -8754,3 +8754,45 @@ class TestCmdApplyReconcileFailureIsolation:
             )
 
         assert "trigger" not in calls
+
+
+class TestComputePlanNewApp:
+    """An app in the config but not in the state file is planned as a create."""
+
+    def test_new_app_is_planned_as_create_with_its_domain_and_mount(self, tmp_path):
+        from unittest.mock import MagicMock
+
+        state_file = tmp_path / ".dokploy-state" / "test.json"
+        state_file.parent.mkdir(parents=True)
+        state_file.write_text(
+            json.dumps({"projectId": "p", "environmentId": "e", "apps": {"app": {"applicationId": "a1", "appName": "g"}}})
+        )
+        cfg = {
+            "project": {"name": "n", "description": "d"},
+            "apps": [
+                {"name": "app", "source": "docker", "dockerImage": "nginx"},
+                {
+                    "name": "api",
+                    "source": "docker",
+                    "dockerImage": "pb",
+                    "domain": [{"host": "api.example.com", "port": 8090}],
+                    "volumes": [{"source": "data", "target": "/data", "type": "volume"}],
+                },
+            ],
+        }
+        client = MagicMock()
+        client.get.side_effect = lambda endpoint, params=None: (
+            [{"projectId": "p"}]
+            if endpoint == "project.all"
+            else {"env": "", "mounts": []}
+            if endpoint == "application.one"
+            else []
+        )
+
+        changes = dokploy.compute_plan(client, cfg, state_file, tmp_path)
+
+        created = {(c["resource_type"], c["name"]) for c in changes if c["action"] == "create"}
+        assert ("application", "api") in created
+        assert ("domain", "api.example.com") in created
+        assert ("mount", "data -> /data") in created
+        assert ("application", "app") not in created

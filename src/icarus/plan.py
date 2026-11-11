@@ -35,6 +35,155 @@ def _env_keys(env_blob: str | None) -> set[str]:
     return keys
 
 
+def _plan_new_app(app_def: dict, changes: list[dict]) -> None:
+    """Populate changes list with every resource that creating one app would make."""
+    name = app_def["name"]
+    compose = is_compose(app_def)
+    rtype = "compose" if compose else "application"
+    attrs: dict = {"source": app_def.get("source", "compose")}
+    if not compose:
+        if app_def.get("source") == "docker":
+            attrs["dockerImage"] = app_def.get("dockerImage", "")
+        elif app_def.get("source") == "github":
+            attrs["buildType"] = app_def.get("buildType", "dockerfile")
+        if app_def.get("registry"):
+            attrs["registry"] = app_def["registry"]
+    changes.append(
+        {
+            "action": "create",
+            "resource_type": rtype,
+            "name": name,
+            "parent": None,
+            "attrs": attrs,
+        }
+    )
+
+    domain_cfg = app_def.get("domain")
+    if domain_cfg:
+        domains = domain_cfg if isinstance(domain_cfg, list) else [domain_cfg]
+        for dom in domains:
+            dom_attrs: dict = {
+                "host": dom["host"],
+                "port": dom["port"],
+                "https": dom.get("https", False),
+                "certificateType": dom.get("certificateType", "none"),
+            }
+            if dom.get("certificate"):
+                dom_attrs["certificate"] = dom["certificate"]
+            changes.append(
+                {
+                    "action": "create",
+                    "resource_type": "domain",
+                    "name": dom["host"],
+                    "parent": name,
+                    "attrs": dom_attrs,
+                }
+            )
+
+    if not compose:
+        settings_payload = build_app_settings_payload("", app_def) or {}
+        settings_keys = {k: v for k, v in settings_payload.items() if k != "applicationId"}
+        if settings_keys:
+            changes.append(
+                {
+                    "action": "create",
+                    "resource_type": "settings",
+                    "name": name,
+                    "parent": None,
+                    "attrs": settings_keys,
+                }
+            )
+
+        for vol in app_def.get("volumes", []):
+            changes.append(
+                {
+                    "action": "create",
+                    "resource_type": "mount",
+                    "name": f"{vol['source']} -> {vol['target']}",
+                    "parent": name,
+                    "attrs": {
+                        "type": vol["type"],
+                        "source": vol["source"],
+                        "target": vol["target"],
+                    },
+                }
+            )
+
+        for port in app_def.get("ports", []):
+            changes.append(
+                {
+                    "action": "create",
+                    "resource_type": "port",
+                    "name": f"{port['publishedPort']} -> {port['targetPort']}",
+                    "parent": name,
+                    "attrs": {
+                        "publishedPort": port["publishedPort"],
+                        "targetPort": port["targetPort"],
+                        "protocol": port.get("protocol", "tcp"),
+                        "publishMode": port.get("publishMode", "ingress"),
+                    },
+                }
+            )
+
+        for sched in app_def.get("schedules", []):
+            changes.append(
+                {
+                    "action": "create",
+                    "resource_type": "schedule",
+                    "name": sched["name"],
+                    "parent": name,
+                    "attrs": {
+                        "cronExpression": sched["cronExpression"],
+                        "command": sched["command"],
+                    },
+                }
+            )
+
+        for sec in app_def.get("security", []):
+            changes.append(
+                {
+                    "action": "create",
+                    "resource_type": "security",
+                    "name": sec["username"],
+                    "parent": name,
+                    "attrs": {
+                        "username": sec["username"],
+                    },
+                }
+            )
+
+        for redir in app_def.get("redirects", []):
+            changes.append(
+                {
+                    "action": "create",
+                    "resource_type": "redirect",
+                    "name": redir["regex"],
+                    "parent": name,
+                    "attrs": {
+                        "regex": redir["regex"],
+                        "replacement": redir["replacement"],
+                        "permanent": redir["permanent"],
+                    },
+                }
+            )
+
+    for vb_def in app_def.get("volumeBackups", []):
+        changes.append(
+            {
+                "action": "create",
+                "resource_type": "volume_backup",
+                "name": vb_def["name"],
+                "parent": name,
+                "attrs": {
+                    "volumeName": vb_def["volumeName"],
+                    "cronExpression": vb_def["cronExpression"],
+                    "destination": vb_def["destination"],
+                    "keepLatestCount": vb_def.get("keepLatestCount"),
+                },
+            }
+        )
+
+
 def _plan_initial_setup(cfg: dict, repo_root: Path, changes: list[dict]) -> None:
     """Populate changes list for a fresh setup (no state exists)."""
     project_cfg = cfg["project"]
@@ -66,151 +215,7 @@ def _plan_initial_setup(cfg: dict, repo_root: Path, changes: list[dict]) -> None
         )
 
     for app_def in cfg["apps"]:
-        name = app_def["name"]
-        compose = is_compose(app_def)
-        rtype = "compose" if compose else "application"
-        attrs: dict = {"source": app_def.get("source", "compose")}
-        if not compose:
-            if app_def.get("source") == "docker":
-                attrs["dockerImage"] = app_def.get("dockerImage", "")
-            elif app_def.get("source") == "github":
-                attrs["buildType"] = app_def.get("buildType", "dockerfile")
-            if app_def.get("registry"):
-                attrs["registry"] = app_def["registry"]
-        changes.append(
-            {
-                "action": "create",
-                "resource_type": rtype,
-                "name": name,
-                "parent": None,
-                "attrs": attrs,
-            }
-        )
-
-        domain_cfg = app_def.get("domain")
-        if domain_cfg:
-            domains = domain_cfg if isinstance(domain_cfg, list) else [domain_cfg]
-            for dom in domains:
-                dom_attrs: dict = {
-                    "host": dom["host"],
-                    "port": dom["port"],
-                    "https": dom.get("https", False),
-                    "certificateType": dom.get("certificateType", "none"),
-                }
-                if dom.get("certificate"):
-                    dom_attrs["certificate"] = dom["certificate"]
-                changes.append(
-                    {
-                        "action": "create",
-                        "resource_type": "domain",
-                        "name": dom["host"],
-                        "parent": name,
-                        "attrs": dom_attrs,
-                    }
-                )
-
-        if not compose:
-            settings_payload = build_app_settings_payload("", app_def) or {}
-            settings_keys = {k: v for k, v in settings_payload.items() if k != "applicationId"}
-            if settings_keys:
-                changes.append(
-                    {
-                        "action": "create",
-                        "resource_type": "settings",
-                        "name": name,
-                        "parent": None,
-                        "attrs": settings_keys,
-                    }
-                )
-
-            for vol in app_def.get("volumes", []):
-                changes.append(
-                    {
-                        "action": "create",
-                        "resource_type": "mount",
-                        "name": f"{vol['source']} -> {vol['target']}",
-                        "parent": name,
-                        "attrs": {
-                            "type": vol["type"],
-                            "source": vol["source"],
-                            "target": vol["target"],
-                        },
-                    }
-                )
-
-            for port in app_def.get("ports", []):
-                changes.append(
-                    {
-                        "action": "create",
-                        "resource_type": "port",
-                        "name": f"{port['publishedPort']} -> {port['targetPort']}",
-                        "parent": name,
-                        "attrs": {
-                            "publishedPort": port["publishedPort"],
-                            "targetPort": port["targetPort"],
-                            "protocol": port.get("protocol", "tcp"),
-                            "publishMode": port.get("publishMode", "ingress"),
-                        },
-                    }
-                )
-
-            for sched in app_def.get("schedules", []):
-                changes.append(
-                    {
-                        "action": "create",
-                        "resource_type": "schedule",
-                        "name": sched["name"],
-                        "parent": name,
-                        "attrs": {
-                            "cronExpression": sched["cronExpression"],
-                            "command": sched["command"],
-                        },
-                    }
-                )
-
-            for sec in app_def.get("security", []):
-                changes.append(
-                    {
-                        "action": "create",
-                        "resource_type": "security",
-                        "name": sec["username"],
-                        "parent": name,
-                        "attrs": {
-                            "username": sec["username"],
-                        },
-                    }
-                )
-
-            for redir in app_def.get("redirects", []):
-                changes.append(
-                    {
-                        "action": "create",
-                        "resource_type": "redirect",
-                        "name": redir["regex"],
-                        "parent": name,
-                        "attrs": {
-                            "regex": redir["regex"],
-                            "replacement": redir["replacement"],
-                            "permanent": redir["permanent"],
-                        },
-                    }
-                )
-
-        for vb_def in app_def.get("volumeBackups", []):
-            changes.append(
-                {
-                    "action": "create",
-                    "resource_type": "volume_backup",
-                    "name": vb_def["name"],
-                    "parent": name,
-                    "attrs": {
-                        "volumeName": vb_def["volumeName"],
-                        "cronExpression": vb_def["cronExpression"],
-                        "destination": vb_def["destination"],
-                        "keepLatestCount": vb_def.get("keepLatestCount"),
-                    },
-                }
-            )
+        _plan_new_app(app_def, changes)
 
     env_targets = cfg["project"].get("env_targets", [])
     if env_targets:
@@ -338,6 +343,10 @@ def _plan_redeploy(
         raw_env = env_file.read_text()
         exclude_prefixes = get_env_excludes()
         filtered_env = filter_env(raw_env, exclude_prefixes)
+
+    for app_def in cfg["apps"]:
+        if app_def["name"] not in state["apps"]:
+            _plan_new_app(app_def, changes)
 
     for name, app_info in state["apps"].items():
         app_def = apps_by_name.get(name)

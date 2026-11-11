@@ -1399,3 +1399,95 @@ class TestCmdSetupComposeGithubIntegration:
         assert sent["githubId"] == "gh-123"
         assert sent["composePath"] == "docker-compose.yml"
         assert "composeFile" not in sent
+
+
+class TestCmdAddMissingApps:
+    def _cfg(self, minimal_config):
+        cfg = json.loads(json.dumps(minimal_config))
+        cfg["apps"].append({"name": "api", "source": "docker", "dockerImage": "pocketbase:test"})
+        return cfg
+
+    def _state(self, state_file: Path) -> None:
+        state_file.parent.mkdir(parents=True, exist_ok=True)
+        state_file.write_text(
+            json.dumps(
+                {
+                    "projectId": "proj-1",
+                    "environmentId": "env-1",
+                    "apps": {"app": {"applicationId": "app-1", "appName": "app-gen"}},
+                }
+            )
+        )
+
+    def test_creates_only_apps_missing_from_state(self, tmp_path, minimal_config):
+        state_file = tmp_path / ".dokploy-state" / "test.json"
+        self._state(state_file)
+
+        router = respx.Router()
+        create = router.post(f"{BASE_URL}/api/application.create").mock(
+            return_value=httpx.Response(200, json={"applicationId": "api-1", "appName": "api-gen"})
+        )
+        provider = router.post(f"{BASE_URL}/api/application.saveDockerProvider").mock(return_value=httpx.Response(200, json={}))
+        client = _make_client(router)
+
+        added = dokploy.cmd_add_missing_apps(client, self._cfg(minimal_config), state_file)
+
+        assert added == ["api"]
+        assert create.call_count == 1
+        assert json.loads(create.calls[0].request.content) == {"name": "api", "environmentId": "env-1"}
+        assert json.loads(provider.calls[0].request.content)["applicationId"] == "api-1"
+        state = json.loads(state_file.read_text())
+        assert state["apps"]["app"] == {"applicationId": "app-1", "appName": "app-gen"}
+        assert state["apps"]["api"] == {"applicationId": "api-1", "appName": "api-gen"}
+
+    def test_does_nothing_when_every_app_is_in_state(self, tmp_path, minimal_config):
+        state_file = tmp_path / ".dokploy-state" / "test.json"
+        self._state(state_file)
+        client = _make_client(respx.Router())
+
+        assert dokploy.cmd_add_missing_apps(client, minimal_config, state_file) == []
+
+    def test_apply_creates_missing_app_on_redeploy(self, tmp_path, minimal_config, monkeypatch):
+        state_file = tmp_path / ".dokploy-state" / "test.json"
+        self._state(state_file)
+        no_ssh = lambda key, default="": default  # noqa: E731
+        monkeypatch.setattr("icarus.commands.config", no_ssh)
+        monkeypatch.setattr("icarus.ssh.config", no_ssh)
+        cfg = self._cfg(minimal_config)
+        (tmp_path / ".env").write_text("FOO=bar\n")
+        (tmp_path / "dokploy.yml").write_text(yaml.dump(cfg))
+        monkeypatch.setenv("DOKPLOY_API_KEY", API_KEY)
+        monkeypatch.setenv("DOKPLOY_URL", BASE_URL)
+
+        with respx.mock(assert_all_called=False) as mock:
+            mock.get(f"{BASE_URL}/").mock(return_value=httpx.Response(200))
+            mock.get(f"{BASE_URL}/api/project.all").mock(
+                return_value=httpx.Response(200, json=[{"projectId": "proj-1", "name": "my-app", "environments": []}])
+            )
+            create = mock.post(f"{BASE_URL}/api/application.create").mock(
+                return_value=httpx.Response(200, json={"applicationId": "api-1", "appName": "api-gen"})
+            )
+            mock.get(f"{BASE_URL}/api/application.one").mock(
+                return_value=httpx.Response(200, json={"applicationId": "x", "applicationStatus": "running", "mounts": []})
+            )
+            mock.get(f"{BASE_URL}/api/domain.byApplicationId").mock(return_value=httpx.Response(200, json=[]))
+            mock.get(f"{BASE_URL}/api/project.one").mock(return_value=httpx.Response(200, json={"environments": []}))
+            mock.get(f"{BASE_URL}/api/destination.all").mock(return_value=httpx.Response(200, json=[]))
+            for ep in (
+                "application.saveDockerProvider",
+                "application.update",
+                "application.saveEnvironment",
+                "domain.create",
+                "application.redeploy",
+                "application.deploy",
+            ):
+                mock.post(f"{BASE_URL}/api/{ep}").mock(return_value=httpx.Response(200, content=b"{}"))
+
+            dokploy.cmd_apply(tmp_path, _make_client_for_mock(), cfg, state_file)
+
+        assert create.call_count == 1
+        assert "api" in json.loads(state_file.read_text())["apps"]
+
+
+def _make_client_for_mock() -> dokploy.DokployClient:
+    return dokploy.DokployClient(BASE_URL, API_KEY)

@@ -4,6 +4,7 @@ from icarus.commands import (
     MANUAL_BACKUP_ENDPOINTS,
     cleanup_orphaned_project_apps,
     cleanup_orphans,
+    cmd_add_missing_apps,
     cmd_apply,
     cmd_backup,
     cmd_check,
