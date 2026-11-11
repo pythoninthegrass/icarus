@@ -7,6 +7,7 @@ import json
 import pytest
 import respx
 import sys
+import types
 import yaml
 from icarus import commands as icarus_commands, ssh as icarus_ssh
 from pathlib import Path
@@ -8796,3 +8797,70 @@ class TestComputePlanNewApp:
         assert ("domain", "api.example.com") in created
         assert ("mount", "data -> /data") in created
         assert ("application", "app") not in created
+
+
+class TestBuildDockerExecArgv:
+    def test_default_port_with_tty(self):
+        from icarus.ssh import build_docker_exec_argv
+
+        argv = build_docker_exec_argv({"host": "h", "user": "u", "port": 22}, "abc123", ["sh"], tty=True)
+        assert argv == ["ssh", "-t", "u@h", "docker", "exec", "-it", "abc123", "sh"]
+
+    def test_custom_port_without_tty(self):
+        from icarus.ssh import build_docker_exec_argv
+
+        argv = build_docker_exec_argv({"host": "h", "user": "u", "port": 2222}, "abc123", ["ls", "/pb_data"], tty=False)
+        assert argv == ["ssh", "-p", "2222", "u@h", "docker", "exec", "-i", "abc123", "ls", "/pb_data"]
+
+
+class TestCmdExecInteractive:
+    def _patch(self, monkeypatch, tty: bool):
+        monkeypatch.setattr(icarus_commands, "load_state", lambda sf: {"apps": {}})
+        monkeypatch.setattr(icarus_commands, "resolve_app_for_exec", lambda state, app: "pocketbase")
+        monkeypatch.setattr(icarus_commands, "get_ssh_config", lambda: {"host": "h", "user": "u", "port": 22})
+        monkeypatch.setattr(icarus_commands, "get_containers", lambda client, name: [])
+        monkeypatch.setattr(
+            icarus_commands,
+            "select_container",
+            lambda containers, exited=False, for_exec=False: {"name": "c", "containerId": "abc123456789", "state": "running"},
+        )
+        monkeypatch.setattr(icarus_commands.sys.stdin, "isatty", lambda: tty, raising=False)
+        monkeypatch.setattr(icarus_commands.sys.stdout, "isatty", lambda: tty, raising=False)
+
+    def test_tty_runs_ssh_docker_exec_and_returns_its_exit_code(self, monkeypatch, tmp_path):
+        self._patch(monkeypatch, tty=True)
+        calls = []
+        monkeypatch.setattr(
+            icarus_commands.subprocess, "run", lambda argv, **kw: calls.append(argv) or types.SimpleNamespace(returncode=3)
+        )
+        monkeypatch.setattr(icarus_commands, "get_docker_client", lambda cfg: pytest.fail("docker-py must not be used on a tty"))
+
+        with pytest.raises(SystemExit) as exc:
+            dokploy.cmd_exec(None, tmp_path / "s.json", "pocketbase", False, None)
+
+        assert exc.value.code == 3
+        assert calls == [["ssh", "-t", "u@h", "docker", "exec", "-it", "abc123456789", "sh"]]
+
+    def test_no_tty_keeps_the_docker_py_path(self, monkeypatch, tmp_path):
+        self._patch(monkeypatch, tty=False)
+        monkeypatch.setattr(
+            icarus_commands.subprocess, "run", lambda *a, **k: pytest.fail("ssh must not be spawned without a tty")
+        )
+
+        class FakeContainer:
+            def exec_run(self, cmd, **kw):
+                assert cmd == ["ls"]
+                return 0, (b"out\n", None)
+
+        class FakeDocker:
+            containers = types.SimpleNamespace(get=lambda cid: FakeContainer())
+
+            def close(self):
+                pass
+
+        monkeypatch.setattr(icarus_commands, "get_docker_client", lambda cfg: FakeDocker())
+
+        with pytest.raises(SystemExit) as exc:
+            dokploy.cmd_exec(None, tmp_path / "s.json", "pocketbase", False, ["ls"])
+
+        assert exc.value.code == 0

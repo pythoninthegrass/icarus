@@ -46,6 +46,18 @@ def build_docker_url(ssh_cfg: dict) -> str:
     return f"ssh://{user}@{host}"
 
 
+def build_docker_exec_argv(ssh_cfg: dict, container_id: str, command: list[str], tty: bool) -> list[str]:
+    """Build the ssh argv that runs `docker exec` in a remote container, interactively when tty is set."""
+    argv = ["ssh"]
+    if tty:
+        argv.append("-t")
+    port = ssh_cfg.get("port", 22)
+    if port != 22:
+        argv += ["-p", str(port)]
+    argv += [f"{ssh_cfg.get('user', 'root')}@{ssh_cfg['host']}", "docker", "exec", "-it" if tty else "-i", container_id]
+    return argv + command
+
+
 def get_docker_client(ssh_cfg: dict) -> docker.DockerClient:
     """Create a Docker client connected via SSH."""
     url = build_docker_url(ssh_cfg)

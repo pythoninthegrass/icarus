@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import httpx
 import os
+import subprocess
 import sys
 import yaml
 from icarus.client import create_and_get_id, created_row, load_state, save_state, validate_state
@@ -59,6 +60,7 @@ from icarus.reconcile import (
     reconcile_volume_backups,
 )
 from icarus.ssh import (
+    build_docker_exec_argv,
     cleanup_orphaned_services,
     cleanup_stale_routes,
     confirm,
@@ -1153,10 +1155,15 @@ def cmd_exec(client: DokployClient, state_file: Path, app: str | None, exited: b
         file=sys.stderr,
     )
 
+    cmd = command if command else ["sh"]
+    if sys.stdin.isatty() and sys.stdout.isatty():
+        # docker-py's exec_run neither forwards stdin nor streams output, so a terminal needs the ssh client.
+        argv = build_docker_exec_argv(ssh_cfg, container_info["containerId"], cmd, tty=True)
+        sys.exit(subprocess.run(argv, check=False).returncode)
+
     docker_client = get_docker_client(ssh_cfg)
     try:
         container = docker_client.containers.get(container_info["containerId"])
-        cmd = command if command else ["sh"]
         exit_code, output = container.exec_run(cmd, stdin=True, tty=True, demux=True)
         if output:
             stdout_data, stderr_data = output
