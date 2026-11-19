@@ -32,6 +32,7 @@ from icarus.env import (
     merge_app_env,
     parse_env_to_dict,
     resolve_app_envs,
+    resolve_env_file,
     resolve_env_for_push,
     resolve_refs,
 )

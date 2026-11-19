@@ -46,6 +46,8 @@ ic check                                 # Pre-flight checks
 ic --env prod setup                      # Create project
 ic --env prod env                        # Push env vars
 ic --env prod --env-file .env.prod env   # Push from alternate .env file
+ic --env prod --env-file .env.prod plan  # Plan reads the same env file as apply
+doppler run --mount .env.doppler --format env -- ic --env prod --env-file .env.doppler plan  # Doppler-injected env
 ic --env prod plan                       # Preview what apply would change (dry run)
 ic --env prod apply                      # Full pipeline: check, setup, env, trigger
 ic --env prod status                     # Check status

@@ -321,6 +321,46 @@ class TestResolveEnvForPush:
         assert "FOO=bar" in result
 
 
+class TestResolveEnvFile:
+    @pytest.fixture(autouse=True)
+    def _clean_env(self, monkeypatch):
+        for var in ("DOTENV_FILE", "DOPPLER_PROJECT", "DOPPLER_CONFIG"):
+            monkeypatch.delenv(var, raising=False)
+
+    def test_defaults_to_repo_root_env(self, tmp_path):
+        assert dokploy.resolve_env_file(tmp_path) == tmp_path / ".env"
+
+    def test_dotenv_file_var_overrides_default(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("DOTENV_FILE", str(tmp_path / "custom.env"))
+        assert dokploy.resolve_env_file(tmp_path) == tmp_path / "custom.env"
+
+    def test_override_wins_over_dotenv_file_var(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("DOTENV_FILE", str(tmp_path / "custom.env"))
+        override = tmp_path / ".env.prod"
+        assert dokploy.resolve_env_file(tmp_path, override) == override
+
+    def test_doppler_session_without_explicit_file_exits(self, tmp_path, monkeypatch, capsys):
+        """Under doppler run, falling back to the default .env could push dev values."""
+        monkeypatch.setenv("DOPPLER_PROJECT", "proj")
+        monkeypatch.setenv("DOPPLER_CONFIG", "prod")
+        with pytest.raises(SystemExit) as exc:
+            dokploy.resolve_env_file(tmp_path)
+        assert exc.value.code == 1
+        assert "--env-file" in capsys.readouterr().out
+
+    def test_doppler_session_accepts_override(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("DOPPLER_PROJECT", "proj")
+        monkeypatch.setenv("DOPPLER_CONFIG", "prod")
+        override = tmp_path / ".env.doppler"
+        assert dokploy.resolve_env_file(tmp_path, override) == override
+
+    def test_doppler_session_accepts_dotenv_file_var(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("DOPPLER_PROJECT", "proj")
+        monkeypatch.setenv("DOPPLER_CONFIG", "prod")
+        monkeypatch.setenv("DOTENV_FILE", str(tmp_path / ".env.doppler"))
+        assert dokploy.resolve_env_file(tmp_path) == tmp_path / ".env.doppler"
+
+
 class TestLoadSaveState:
     def test_round_trip(self, tmp_path, sample_state):
         state_file = tmp_path / ".dokploy-state" / "test.json"
@@ -2735,6 +2775,65 @@ class TestComputePlanEnvChanges:
         assert app_env[0]["action"] == "update"
         assert "added" in app_env[0]["attrs"]
         assert "removed" in app_env[0]["attrs"]
+
+    def _plan_env_changes(self, tmp_path, web_app_config, **plan_kwargs):
+        cfg = dokploy.merge_env_overrides(web_app_config, "dev")
+        state = _make_plan_state(cfg["apps"])
+        state_file = tmp_path / ".dokploy-state" / "dev.json"
+        state_file.parent.mkdir(parents=True)
+        state_file.write_text(json.dumps(state))
+        (tmp_path / ".env").write_text("DEV_ONLY=1\n")
+        (tmp_path / ".env.prod").write_text("APP_SECRET=hunter2\n")
+
+        def mock_get(endpoint, params=None):
+            if endpoint == "project.all":
+                return [{"projectId": "proj-123"}]
+            if endpoint == "application.one":
+                return {"applicationId": params["applicationId"], "env": "APP_SECRET=hunter2\n"}
+            if endpoint == "compose.one":
+                return {"composeId": params["composeId"], "env": ""}
+            if endpoint == "schedule.list":
+                return []
+            return {}
+
+        client = MagicMock()
+        client.get.side_effect = mock_get
+        changes = dokploy.compute_plan(client, cfg, state_file, tmp_path, **plan_kwargs)
+        targets = set(cfg["project"]["env_targets"])
+        return [c for c in changes if c["resource_type"] == "environment" and c["name"] in targets]
+
+    def test_env_file_override_replaces_default_env(self, tmp_path, web_app_config):
+        """Plan diffs the --env-file that apply would push, not <repo>/.env."""
+        changes = self._plan_env_changes(tmp_path, web_app_config, env_file_override=tmp_path / ".env.prod")
+        assert changes == []
+
+    def test_dotenv_file_var_replaces_default_env(self, tmp_path, web_app_config, monkeypatch):
+        monkeypatch.setenv("DOTENV_FILE", str(tmp_path / ".env.prod"))
+        changes = self._plan_env_changes(tmp_path, web_app_config)
+        assert changes == []
+
+    def test_default_env_still_used_without_override(self, tmp_path, web_app_config, monkeypatch):
+        monkeypatch.delenv("DOTENV_FILE", raising=False)
+        changes = self._plan_env_changes(tmp_path, web_app_config)
+        assert changes
+        assert "DEV_ONLY" in changes[0]["attrs"]["added"]
+
+
+class TestCmdPlanEnvSource:
+    def test_prints_env_file_used_for_env_targets(self, tmp_path, web_app_config, capsys, monkeypatch):
+        monkeypatch.delenv("DOTENV_FILE", raising=False)
+        cfg = dokploy.merge_env_overrides(web_app_config, "dev")
+        override = tmp_path / ".env.prod"
+        with patch("icarus.plan.compute_plan", return_value=[]):
+            dokploy.cmd_plan(MagicMock(), cfg, tmp_path / "dev.json", tmp_path, env_file_override=override)
+        assert f"env source: {override}" in capsys.readouterr().out
+
+    def test_omitted_without_env_targets(self, tmp_path, minimal_config, capsys):
+        cfg = dokploy.merge_env_overrides(minimal_config, "dev")
+        cfg["project"].pop("env_targets", None)
+        with patch("icarus.plan.compute_plan", return_value=[]):
+            dokploy.cmd_plan(MagicMock(), cfg, tmp_path / "dev.json", tmp_path)
+        assert "env source" not in capsys.readouterr().out
 
 
 class TestComputePlanScheduleChanges:

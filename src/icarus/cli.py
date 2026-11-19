@@ -147,7 +147,7 @@ def main() -> None:
 
     match args.command:
         case "plan":
-            cmd_plan(client, cfg, state_file, repo_root)
+            cmd_plan(client, cfg, state_file, repo_root, env_file_override=args.env_file)
         case "setup":
             cmd_setup(client, cfg, state_file, repo_root)
         case "env":

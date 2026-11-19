@@ -13,6 +13,7 @@ from icarus.env import (
     merge_app_env,
     parse_env_to_dict,
     resolve_app_envs,
+    resolve_env_file,
     resolve_env_for_push,
     resolve_refs,
 )
@@ -713,12 +714,12 @@ def cmd_env(
 ) -> None:
     state = load_state(state_file)
     env_targets = cfg["project"].get("env_targets", [])
-    env_file = env_file_override or Path(os.environ.get("DOTENV_FILE", str(repo_root / ".env")))
     apps_by_name = {a["name"]: a for a in cfg["apps"]}
 
     env_targets_set = set(env_targets)
 
     if env_targets:
+        env_file = resolve_env_file(repo_root, env_file_override)
         if not env_file.exists():
             print(f"ERROR: {env_file} not found.")
             sys.exit(1)
@@ -845,7 +846,8 @@ def cmd_trigger(
     state = load_state(state_file)
 
     if redeploy and repo_root is not None:
-        env_file = env_file_override or Path(os.environ.get("DOTENV_FILE", str(repo_root / ".env")))
+        has_env_targets = bool(cfg["project"].get("env_targets"))
+        env_file = resolve_env_file(repo_root, env_file_override) if has_env_targets else None
         app_envs = resolve_app_envs(cfg, state, env_file)
         if app_envs:
             print("Syncing env into live service specs...")

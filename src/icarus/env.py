@@ -1,4 +1,6 @@
+import os
 import re
+import sys
 from decouple import Config, RepositoryEnv
 from icarus.config import config
 from pathlib import Path
@@ -12,6 +14,24 @@ DEFAULT_ENV_EXCLUDES = [
     "POSTGRES_VERSION",
     "TASK_X_",
 ]
+
+
+def resolve_env_file(repo_root: Path, override: Path | None = None) -> Path:
+    """Pick the env file: ``--env-file``, then ``DOTENV_FILE``, then ``<repo>/.env``.
+
+    Exits when running under ``doppler run`` without an explicit file, so a local
+    dev ``.env`` can never stand in for the injected secrets.
+    """
+    if override:
+        return override
+    from_var = os.environ.get("DOTENV_FILE")
+    if from_var:
+        return Path(from_var)
+    if os.environ.get("DOPPLER_PROJECT") and os.environ.get("DOPPLER_CONFIG"):
+        print("ERROR: running under doppler run; pass --env-file or set DOTENV_FILE to a Doppler-mounted file")
+        print("  e.g. doppler run --mount .env.doppler --format env -- ic --env-file .env.doppler plan")
+        sys.exit(1)
+    return repo_root / ".env"
 
 
 def get_env_excludes() -> list[str]:
@@ -123,7 +143,7 @@ def parse_env_to_dict(content: str) -> dict[str, str]:
     return result
 
 
-def resolve_app_envs(cfg: dict, state: dict, env_file: Path) -> dict[str, str]:
+def resolve_app_envs(cfg: dict, state: dict, env_file: Path | None) -> dict[str, str]:
     """Build a mapping of app_config_name → resolved dotenv string.
 
     Mirrors cmd_env's resolution logic so that cmd_trigger can push the same
@@ -135,7 +155,7 @@ def resolve_app_envs(cfg: dict, state: dict, env_file: Path) -> dict[str, str]:
     env_targets_set = set(env_targets)
     apps_by_name = {a["name"]: a for a in cfg.get("apps", [])}
 
-    if env_targets and env_file.exists():
+    if env_targets and env_file is not None and env_file.exists():
         exclude_patterns = get_env_excludes()
         filtered = resolve_env_for_push(env_file, exclude_patterns)
         for name in env_targets:
