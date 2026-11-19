@@ -3312,6 +3312,57 @@ class TestDomainReconciliation:
         assert create_calls[0][0][1]["serviceName"] == "web"
         assert result["compose.example.com"]["domainId"] == "d1"
 
+    def test_reconcile_skips_update_when_only_unset_keys_differ(self):
+        """Path keys the config leaves unset keep Dokploy's default and do not trigger an update."""
+        existing = [
+            {
+                "domainId": "d1",
+                "host": "app.example.com",
+                "port": 80,
+                "https": True,
+                "certificateType": "letsencrypt",
+                "path": "/",
+                "internalPath": "/",
+                "stripPath": False,
+            },
+        ]
+        desired = [{"host": "app.example.com", "port": 80, "https": True, "certificateType": "letsencrypt"}]
+        client = MagicMock()
+
+        dokploy.reconcile_domains(client, "app-1", existing, desired)
+
+        assert [c for c in client.post.call_args_list if c[0][0] == "domain.update"] == []
+
+    def test_reconcile_updates_when_set_path_key_differs(self):
+        existing = [
+            {
+                "domainId": "d1",
+                "host": "app.example.com",
+                "port": 80,
+                "https": True,
+                "certificateType": "letsencrypt",
+                "path": "/",
+                "internalPath": "/",
+                "stripPath": False,
+            },
+        ]
+        desired = [
+            {
+                "host": "app.example.com",
+                "port": 80,
+                "https": True,
+                "certificateType": "letsencrypt",
+                "internalPath": "/api",
+            },
+        ]
+        client = MagicMock()
+
+        dokploy.reconcile_domains(client, "app-1", existing, desired)
+
+        update_calls = [c for c in client.post.call_args_list if c[0][0] == "domain.update"]
+        assert len(update_calls) == 1
+        assert update_calls[0][0][1]["internalPath"] == "/api"
+
     def test_same_host_different_path_creates_both(self):
         """reconcile_domains treats same host + different path as distinct domains."""
         existing = []
@@ -3488,6 +3539,39 @@ class TestPlanDomainChanges:
         updated = [c for c in domain_changes if c["action"] == "update"]
         assert len(updated) == 1
         assert updated[0]["name"] == "kept.example.com"
+
+    def _plan_domain_changes(self, tmp_path, desired_domain, remote_domain):
+        state = {"projectId": "proj-1", "apps": {"web": {"applicationId": "app-1"}}}
+        cfg = {
+            "project": {"name": "test", "description": "test"},
+            "apps": [{"name": "web", "source": {"type": "docker", "image": "nginx"}, "domain": desired_domain}],
+        }
+        client = MagicMock()
+        client.get.side_effect = lambda endpoint, params=None: (
+            {"env": ""} if endpoint == "application.one" else [remote_domain] if endpoint == "domain.byApplicationId" else {}
+        )
+        changes: list[dict] = []
+        dokploy._plan_redeploy(client, cfg, state, tmp_path, changes)
+        return [c for c in changes if c["resource_type"] == "domain"]
+
+    def test_plan_ignores_unset_path_keys(self, tmp_path):
+        """Path keys the config leaves unset keep Dokploy's default and are not reported."""
+        desired = {"host": "app.example.com", "port": 80, "https": True, "certificateType": "letsencrypt"}
+        remote = {**desired, "domainId": "d1", "path": "/", "internalPath": "/", "stripPath": False}
+        assert self._plan_domain_changes(tmp_path, desired, remote) == []
+
+    def test_plan_reports_set_path_key_that_differs(self, tmp_path):
+        desired = {
+            "host": "app.example.com",
+            "port": 80,
+            "https": True,
+            "certificateType": "letsencrypt",
+            "internalPath": "/api",
+        }
+        remote = {**desired, "domainId": "d1", "internalPath": "/", "path": "/", "stripPath": False}
+        changes = self._plan_domain_changes(tmp_path, desired, remote)
+        assert len(changes) == 1
+        assert changes[0]["attrs"] == {"internalPath": ("/", "/api")}
 
     def test_plan_same_host_different_path_creates_missing_only(self, tmp_path):
         """_plan_redeploy treats same host + different path as distinct domains.

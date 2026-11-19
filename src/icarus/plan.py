@@ -10,6 +10,7 @@ from icarus.payloads import (
     build_redirect_payload,
     build_schedule_payload,
     build_security_payload,
+    domain_diffs,
     is_compose,
 )
 from icarus.reconcile import _domain_key
@@ -406,12 +407,7 @@ def _plan_redeploy(
                 label = host if path == "/" else f"{host}{path}"
                 if (host, path) in existing_by_key:
                     ex = existing_by_key[(host, path)]
-                    diffs: dict = {}
-                    for key in ("port", "https", "certificateType", "path", "internalPath", "stripPath"):
-                        old_val = ex.get(key)
-                        new_val = dom.get(key)
-                        if old_val != new_val:
-                            diffs[key] = (old_val, new_val)
+                    diffs = domain_diffs(dom, ex)
                     if diffs:
                         changes.append(
                             {
