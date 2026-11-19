@@ -104,6 +104,7 @@ from icarus.schema import (
     get_state_file,
     load_config,
     merge_env_overrides,
+    scope_config,
     validate_config,
     validate_env_references,
 )

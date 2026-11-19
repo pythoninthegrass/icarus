@@ -38,6 +38,7 @@ from icarus.schema import (
     get_state_file,
     load_config,
     merge_env_overrides,
+    scope_config,
     validate_config,
     validate_env_references,
 )
@@ -60,10 +61,13 @@ def main() -> None:
     sub = parser.add_subparsers(dest="command")
 
     sub.add_parser("check", help="Pre-flight checks")
-    sub.add_parser("plan", help="Show what apply would change without executing")
+    app_help = "Limit to this app (repeatable); default: all apps"
+    plan_parser = sub.add_parser("plan", help="Show what apply would change without executing")
+    plan_parser.add_argument("--app", action="append", metavar="NAME", help=app_help)
     sub.add_parser("setup", help="Create project + apps")
     sub.add_parser("env", help="Push environment variables")
-    sub.add_parser("apply", help="Full pipeline: check, setup, env, trigger")
+    apply_parser = sub.add_parser("apply", help="Full pipeline: check, setup, env, trigger")
+    apply_parser.add_argument("--app", action="append", metavar="NAME", help=app_help)
     sub.add_parser("trigger", help="Deploy apps in wave order")
     sub.add_parser("status", help="Show deployment status")
     clean_parser = sub.add_parser("clean", help="Remove stale Traefik configs and orphaned Docker services")
@@ -144,6 +148,8 @@ def main() -> None:
     validate_env_references(cfg)
     cfg = merge_env_overrides(cfg, env_name)
     validate_config(cfg)
+    if getattr(args, "app", None):
+        cfg = scope_config(cfg, args.app)
 
     match args.command:
         case "plan":

@@ -524,6 +524,22 @@ Rules:
 
 Example: `ENV_EXCLUDES=DEV,DEBUG,MY_SECRET_` excludes the exact keys `DEV` and `DEBUG`, plus any key starting with `MY_SECRET_`.
 
+## Scoping to Specific Apps
+
+`ic plan` and `ic apply` accept `--app NAME` (repeatable) to limit creates, updates, reconcile steps, env pushes, and deploys to the named apps. Naming an app that is not in `dokploy.yml` is an error.
+
+```bash
+ic --env prod plan --app site                 # preview one app
+ic --env prod apply --app web --app worker    # apply two apps
+```
+
+Scoping details:
+
+- `env_targets` and `deploy_order` are narrowed to the named apps; waves left empty are dropped.
+- `database` entries are skipped. Shared sections (`registries`, `destinations`, `certificates`) are still reconciled.
+- `{app_name}` references still resolve against the full state file, so an env template can point at an app that is not in scope.
+- Without `--app`, every app is processed.
+
 ## Schema Directive
 
 The `# yaml-language-server` directive at the top of `dokploy.yml` enables IDE features:

@@ -140,6 +140,79 @@ class TestMergeEnvOverrides:
         assert web_app_config == original
 
 
+class TestScopeConfig:
+    def test_keeps_only_named_apps(self, web_app_config):
+        scoped = dokploy.scope_config(web_app_config, ["web", "worker"])
+        assert [a["name"] for a in scoped["apps"]] == ["web", "worker"]
+
+    def test_filters_env_targets(self, web_app_config):
+        scoped = dokploy.scope_config(web_app_config, ["web", "redis"])
+        assert scoped["project"]["env_targets"] == ["web"]
+
+    def test_filters_deploy_order_and_drops_empty_waves(self, web_app_config):
+        scoped = dokploy.scope_config(web_app_config, ["web", "beat"])
+        assert scoped["project"]["deploy_order"] == [["web", "beat"]]
+
+    def test_drops_databases(self, web_app_config):
+        web_app_config["database"] = [{"name": "pg", "type": "postgres"}]
+        scoped = dokploy.scope_config(web_app_config, ["web"])
+        assert "database" not in scoped
+
+    def test_does_not_mutate_input(self, web_app_config):
+        before = yaml.safe_dump(web_app_config)
+        dokploy.scope_config(web_app_config, ["web"])
+        assert yaml.safe_dump(web_app_config) == before
+
+    def test_unknown_app_exits(self, web_app_config, capsys):
+        with pytest.raises(SystemExit) as exc:
+            dokploy.scope_config(web_app_config, ["web", "nope"])
+        assert exc.value.code == 1
+        assert "nope" in capsys.readouterr().out
+
+
+class TestCliAppScope:
+    @pytest.fixture
+    def run_cli(self, tmp_path, web_app_config, monkeypatch):
+        monkeypatch.setenv("DOKPLOY_API_KEY", "key")
+        monkeypatch.setenv("DOKPLOY_URL", "https://dokploy.test")
+
+        def _run(*argv):
+            seen: dict = {}
+            with (
+                patch.object(sys, "argv", ["ic", "--env", "dev", *argv]),
+                patch("icarus.cli.find_repo_root", return_value=tmp_path),
+                patch("icarus.cli.load_config", return_value=web_app_config),
+                patch("icarus.cli.cmd_plan", lambda client, cfg, *a, **kw: seen.update(cfg=cfg)),
+                patch("icarus.cli.cmd_apply", lambda repo_root, client, cfg, *a, **kw: seen.update(cfg=cfg)),
+            ):
+                dokploy.main()
+            return seen
+
+        return _run
+
+    def test_plan_scopes_to_repeated_app_flags(self, run_cli):
+        seen = run_cli("plan", "--app", "web", "--app", "worker")
+        assert [a["name"] for a in seen["cfg"]["apps"]] == ["web", "worker"]
+
+    def test_apply_scopes_to_app_flag(self, run_cli):
+        seen = run_cli("apply", "--app", "web")
+        assert [a["name"] for a in seen["cfg"]["apps"]] == ["web"]
+
+    def test_no_app_flag_keeps_every_app(self, run_cli, web_app_config):
+        seen = run_cli("plan")
+        assert len(seen["cfg"]["apps"]) == len(web_app_config["apps"])
+
+    def test_unknown_app_exits(self, run_cli):
+        with pytest.raises(SystemExit) as exc:
+            run_cli("plan", "--app", "nope")
+        assert exc.value.code == 1
+
+    def test_app_flag_rejected_on_other_commands(self, run_cli):
+        with pytest.raises(SystemExit) as exc:
+            run_cli("env", "--app", "web")
+        assert exc.value.code == 2
+
+
 class TestResolveRefs:
     def test_single_ref(self, sample_state):
         result = dokploy.resolve_refs("redis://{redis}:6379/0", sample_state)
