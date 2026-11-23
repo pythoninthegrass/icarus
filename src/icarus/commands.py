@@ -789,7 +789,9 @@ def cmd_env(
             compose_id = app_info["composeId"]
             print(f"Pushing custom env to compose {name}...")
             existing = client.get("compose.one", {"composeId": compose_id})
-            prev_env = existing.get("env", "")
+            # Dokploy returns "env": null on a compose app that has never had env pushed,
+            # and dict.get's default only covers a missing key, so coerce explicitly.
+            prev_env = existing.get("env") or ""
             merged = (prev_env.rstrip("\n") + "\n" + resolved).lstrip("\n")
             client.post(
                 "compose.update",
