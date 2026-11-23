@@ -2,9 +2,11 @@
 
 import httpx
 import icarus as dokploy
+import io
 import json
 import pytest
 import respx
+import sys
 import yaml
 from icarus import commands as icarus_commands, ssh as icarus_ssh
 from pathlib import Path
@@ -989,6 +991,216 @@ class TestCmdStatus:
         assert "running" in output
         assert "idle" in output
         assert "proj-1" in output
+
+
+class TestCmdLogs:
+    """cmd_logs must prefer the Dokploy readLogs API; SSH is the fallback, not the path."""
+
+    def _write_state(self, state_file: Path, state: dict) -> None:
+        state_file.parent.mkdir(parents=True, exist_ok=True)
+        state_file.write_text(json.dumps(state))
+
+    def _capture_stdout(self, monkeypatch) -> io.BytesIO:
+        """Replace sys.stdout with a buffer-only sink, matching how cmd_logs writes logs."""
+        stream = io.BytesIO()
+        monkeypatch.setattr(sys, "stdout", type("_Stdout", (), {"buffer": stream})())
+        return stream
+
+    def _forbid_ssh(self, monkeypatch) -> None:
+        def _boom(*args, **kwargs):
+            raise AssertionError("cmd_logs reached for SSH on a path the API can serve")
+
+        monkeypatch.setattr(icarus_commands, "get_ssh_config", _boom)
+        monkeypatch.setattr(icarus_commands, "get_docker_client", _boom)
+
+    def _running_container(self, router: respx.Router) -> respx.Router:
+        router.get(f"{BASE_URL}/api/docker.getContainersByAppNameMatch").mock(
+            return_value=httpx.Response(
+                200,
+                json=[{"name": "compose-gen-app-1", "containerId": "abc123def456", "state": "running"}],
+            )
+        )
+        return router
+
+    def test_compose_logs_use_api_without_ssh(self, tmp_path, monkeypatch):
+        """Compose apps read through compose.readLogs with no SSH host and no docker-py."""
+        state = {
+            "projectId": "proj-1",
+            "environmentId": "env-1",
+            "apps": {"readeck": {"composeId": "cmp-1", "appName": "compose-gen", "source": "compose"}},
+        }
+        state_file = tmp_path / ".dokploy-state" / "test.json"
+        self._write_state(state_file, state)
+        self._forbid_ssh(monkeypatch)
+
+        router = self._running_container(respx.Router())
+        logs_route = router.get(f"{BASE_URL}/api/compose.readLogs").mock(
+            return_value=httpx.Response(200, json="readeck listening\nserved 303\n")
+        )
+        client = _make_client(router)
+        out = self._capture_stdout(monkeypatch)
+
+        dokploy.cmd_logs(client, state_file, "readeck", follow=False, tail=50, exited=False)
+
+        assert out.getvalue().decode() == "readeck listening\nserved 303\n"
+        params = logs_route.calls.last.request.url.params
+        assert params["composeId"] == "cmp-1"
+        assert params["containerId"] == "abc123def456"
+        assert params["tail"] == "50"
+
+    def test_application_logs_use_api_without_ssh(self, tmp_path, monkeypatch):
+        """Application apps read through application.readLogs, which needs no container id."""
+        state = {
+            "projectId": "proj-1",
+            "environmentId": "env-1",
+            "apps": {"web": {"applicationId": "app-1", "appName": "web-gen", "source": "docker"}},
+        }
+        state_file = tmp_path / ".dokploy-state" / "test.json"
+        self._write_state(state_file, state)
+        self._forbid_ssh(monkeypatch)
+
+        router = respx.Router()
+        router.get(f"{BASE_URL}/api/docker.getContainersByAppNameMatch").mock(
+            return_value=httpx.Response(200, json=[{"name": "web-gen-1", "containerId": "feedfacecafe", "state": "running"}])
+        )
+        logs_route = router.get(f"{BASE_URL}/api/application.readLogs").mock(
+            return_value=httpx.Response(200, json="gunicorn booted\n")
+        )
+        client = _make_client(router)
+        out = self._capture_stdout(monkeypatch)
+
+        dokploy.cmd_logs(client, state_file, "web", follow=False, tail=10, exited=False)
+
+        assert out.getvalue().decode() == "gunicorn booted\n"
+        params = logs_route.calls.last.request.url.params
+        assert params["applicationId"] == "app-1"
+        assert params["tail"] == "10"
+
+    def test_api_rejection_falls_back_to_docker_py(self, tmp_path, monkeypatch):
+        """A server without the readLogs endpoint must not lose the logs command."""
+        state = {
+            "projectId": "proj-1",
+            "environmentId": "env-1",
+            "apps": {"readeck": {"composeId": "cmp-1", "appName": "compose-gen", "source": "compose"}},
+        }
+        state_file = tmp_path / ".dokploy-state" / "test.json"
+        self._write_state(state_file, state)
+
+        seen: dict = {}
+
+        class _Container:
+            def logs(self, **kwargs):
+                seen["logs_kwargs"] = kwargs
+                return b"from docker-py\n"
+
+        class _Containers:
+            def get(self, container_id):
+                seen["cid"] = container_id
+                return _Container()
+
+        class _Docker:
+            containers = _Containers()
+
+            def close(self):
+                seen["closed"] = True
+
+        def _fake_docker(ssh_cfg):
+            seen["cfg"] = ssh_cfg
+            return _Docker()
+
+        monkeypatch.setattr(icarus_commands, "get_ssh_config", lambda: {"host": "h", "user": "root", "port": 22})
+        monkeypatch.setattr(icarus_commands, "get_docker_client", _fake_docker)
+
+        router = self._running_container(respx.Router())
+        logs_route = router.get(f"{BASE_URL}/api/compose.readLogs").mock(
+            return_value=httpx.Response(404, json={"message": "Not found"})
+        )
+        client = _make_client(router)
+        out = self._capture_stdout(monkeypatch)
+
+        dokploy.cmd_logs(client, state_file, "readeck", follow=False, tail=30, exited=False)
+
+        assert out.getvalue().decode() == "from docker-py\n"
+        assert logs_route.called, "the API must be tried before docker-py"
+        assert seen["cfg"] == {"host": "h", "user": "root", "port": 22}
+        assert seen["cid"] == "abc123def456"
+        assert seen["logs_kwargs"] == {"tail": 30}
+        assert seen["closed"] is True
+
+    def test_follow_streams_over_ssh_not_the_api(self, tmp_path, monkeypatch):
+        """The API replies once with a snapshot, so -f must keep using docker-py."""
+        state = {
+            "projectId": "proj-1",
+            "environmentId": "env-1",
+            "apps": {"readeck": {"composeId": "cmp-1", "appName": "compose-gen", "source": "compose"}},
+        }
+        state_file = tmp_path / ".dokploy-state" / "test.json"
+        self._write_state(state_file, state)
+
+        seen: dict = {}
+
+        class _Container:
+            def logs(self, **kwargs):
+                seen["logs_kwargs"] = kwargs
+                return [b"chunk "]
+
+        class _Docker:
+            containers = type("C", (), {"get": lambda self, cid: _Container()})()
+
+            def close(self):
+                pass
+
+        monkeypatch.setattr(icarus_commands, "get_ssh_config", lambda: {"host": "h", "user": "root", "port": 22})
+        monkeypatch.setattr(icarus_commands, "get_docker_client", lambda cfg: _Docker())
+
+        router = self._running_container(respx.Router())
+        logs_route = router.get(f"{BASE_URL}/api/compose.readLogs").mock(return_value=httpx.Response(200, json="snapshot\n"))
+        client = _make_client(router)
+        out = self._capture_stdout(monkeypatch)
+
+        dokploy.cmd_logs(client, state_file, "readeck", follow=True, tail=20, exited=False)
+
+        assert not logs_route.called
+        assert out.getvalue().decode() == "chunk "
+        assert seen["logs_kwargs"]["follow"] is True
+        assert seen["logs_kwargs"]["stream"] is True
+
+    def test_tail_zero_fetches_every_line_over_ssh(self, tmp_path, monkeypatch):
+        """readLogs caps tail at 1, so ic logs -n 0 keeps its docker-py 'all' meaning."""
+        state = {
+            "projectId": "proj-1",
+            "environmentId": "env-1",
+            "apps": {"readeck": {"composeId": "cmp-1", "appName": "compose-gen", "source": "compose"}},
+        }
+        state_file = tmp_path / ".dokploy-state" / "test.json"
+        self._write_state(state_file, state)
+
+        seen: dict = {}
+
+        class _Container:
+            def logs(self, **kwargs):
+                seen["logs_kwargs"] = kwargs
+                return b"every line\n"
+
+        class _Docker:
+            containers = type("C", (), {"get": lambda self, cid: _Container()})()
+
+            def close(self):
+                pass
+
+        monkeypatch.setattr(icarus_commands, "get_ssh_config", lambda: {"host": "h", "user": "root", "port": 22})
+        monkeypatch.setattr(icarus_commands, "get_docker_client", lambda cfg: _Docker())
+
+        router = self._running_container(respx.Router())
+        logs_route = router.get(f"{BASE_URL}/api/compose.readLogs").mock(return_value=httpx.Response(200, json="capped\n"))
+        client = _make_client(router)
+        out = self._capture_stdout(monkeypatch)
+
+        dokploy.cmd_logs(client, state_file, "readeck", follow=False, tail=0, exited=False)
+
+        assert not logs_route.called
+        assert out.getvalue().decode() == "every line\n"
+        assert seen["logs_kwargs"] == {"tail": "all"}
 
 
 class TestCmdDestroy:

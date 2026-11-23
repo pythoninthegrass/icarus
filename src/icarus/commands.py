@@ -1115,11 +1115,26 @@ def cmd_git_provider_remove(client: DokployClient, provider_id: str) -> None:
     print("  Removed.")
 
 
+def _api_logs_or_none(client: DokployClient, app_info: dict, container_id: str, tail: int) -> str | None:
+    """Fetch logs through the API, or None when the server cannot serve them.
+
+    Dokploy before 0.31 has no readLogs endpoints, and a container replaced since
+    the state file was written will not be known to them; either way the caller
+    falls back to docker-py over SSH.
+    """
+    try:
+        return client.read_logs(app_info, container_id=container_id, tail=tail)
+    except Exception as exc:
+        print(f"  API logs unavailable ({type(exc).__name__}: {exc}); falling back to SSH", file=sys.stderr)
+        return None
+
+
 def cmd_logs(client: DokployClient, state_file: Path, app: str | None, follow: bool, tail: int, exited: bool) -> None:
-    """Fetch container logs via docker-py over SSH."""
+    """Fetch container logs, via the API when it can serve them and SSH otherwise."""
     state = load_state(state_file)
-    dokploy_name = resolve_app_for_exec(state, app)
-    ssh_cfg = get_ssh_config()
+    name = resolve_app_name(state, app)
+    app_info = state["apps"][name]
+    dokploy_name = app_info["appName"]
 
     containers = get_containers(client, dokploy_name)
     container_info = select_container(containers, exited=exited)
@@ -1128,6 +1143,17 @@ def cmd_logs(client: DokployClient, state_file: Path, app: str | None, follow: b
         file=sys.stderr,
     )
 
+    # readLogs returns one snapshot with tail capped at 1..10000, so -f cannot
+    # stream and -n 0 cannot mean "everything"; both keep the docker-py path.
+    if not follow and tail > 0:
+        logs = _api_logs_or_none(client, app_info, container_info["containerId"], tail)
+        if logs is not None:
+            text = logs if logs.endswith("\n") else logs + "\n"
+            sys.stdout.buffer.write(text.encode("utf-8", "replace"))
+            sys.stdout.buffer.flush()
+            return
+
+    ssh_cfg = get_ssh_config()
     docker_client = get_docker_client(ssh_cfg)
     try:
         container = docker_client.containers.get(container_info["containerId"])

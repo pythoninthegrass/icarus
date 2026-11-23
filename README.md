@@ -106,7 +106,7 @@ cd my-project
 | `status`  | Show application status for all apps in the project                                             |
 | `clean`   | Remove stale Traefik rules, orphaned Dokploy apps, and orphaned swarm services                  |
 | `destroy` | Delete the Dokploy project (cascades to all apps) and remove state file                         |
-| `logs`    | Tail container logs (`-f` to follow, `-n` for line count, `--exited` for stopped containers)    |
+| `logs`    | Read container logs via the API (`--exited` picks a stopped one; `-f` and `-n 0` stream over SSH) |
 | `exec`    | Open an interactive shell or run a command in a running container                               |
 
 ## Environment Selection

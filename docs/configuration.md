@@ -469,13 +469,13 @@ Resolution happens during `setup` (for commands) and `env` (for environment vari
 | `DOTENV_FILE`          | no            | `.env`  | Path to `.env` file for config and push (see below)              |
 | `ENV_EXCLUDES`         | no            | —       | Extra env var exclusion patterns when pushing `.env` (see below) |
 | `ENV_EXCLUDE_PREFIXES` | no            | —       | Legacy alias for `ENV_EXCLUDES`                                  |
-| `DOKPLOY_SSH_HOST`     | for logs/exec | —       | SSH host for Docker access (IP or hostname)                      |
+| `DOKPLOY_SSH_HOST`     | exec, logs -f | —       | SSH host for Docker access (IP or hostname)                      |
 | `DOKPLOY_SSH_USER`     | no            | `root`  | SSH user for Docker access                                       |
 | `DOKPLOY_SSH_PORT`     | no            | `22`    | SSH port for Docker access                                       |
 
 Resolution order: `--env` flag > `DOKPLOY_ENV` (from `.env` or environment) > `dev`.
 
-The `DOKPLOY_SSH_*` variables are only required for the `logs` and `exec` commands, which connect to the Docker daemon on the Dokploy host via SSH.
+The `DOKPLOY_SSH_*` variables are required for the `exec` and `clean` commands, which connect to the Docker daemon on the Dokploy host via SSH. `logs` reads through the REST API and needs SSH only for `-f`, for `-n 0`, and when the server predates the log endpoints.
 
 ### Env File Selection
 
