@@ -795,10 +795,12 @@ def cmd_env(
             # Upsert by key: appending would add a copy every apply and leave stale
             # values, such as the previous hostname of a renamed app, as earlier duplicates.
             merged = merge_app_env(prev_env, resolved).lstrip("\n")
-            client.post(
-                "compose.update",
-                {"composeId": compose_id, "env": merged},
-            )
+            payload = {"composeId": compose_id, "env": merged}
+            if app_def.get("sourceType") != "github":
+                # Dokploy deploys the copy it stores, not the file in the repo, so an
+                # authored compose edit never lands unless it travels with the env.
+                payload.update(build_compose_update_payload(compose_id, app_def, None, None, repo_root))
+            client.post("compose.update", payload)
         else:
             app_id = app_info["applicationId"]
             create_env_file = app_def.get("create_env_file", False)
