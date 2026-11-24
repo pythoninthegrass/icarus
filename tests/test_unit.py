@@ -140,6 +140,79 @@ class TestMergeEnvOverrides:
         assert web_app_config == original
 
 
+class TestScopeConfig:
+    def test_keeps_only_named_apps(self, web_app_config):
+        scoped = dokploy.scope_config(web_app_config, ["web", "worker"])
+        assert [a["name"] for a in scoped["apps"]] == ["web", "worker"]
+
+    def test_filters_env_targets(self, web_app_config):
+        scoped = dokploy.scope_config(web_app_config, ["web", "redis"])
+        assert scoped["project"]["env_targets"] == ["web"]
+
+    def test_filters_deploy_order_and_drops_empty_waves(self, web_app_config):
+        scoped = dokploy.scope_config(web_app_config, ["web", "beat"])
+        assert scoped["project"]["deploy_order"] == [["web", "beat"]]
+
+    def test_drops_databases(self, web_app_config):
+        web_app_config["database"] = [{"name": "pg", "type": "postgres"}]
+        scoped = dokploy.scope_config(web_app_config, ["web"])
+        assert "database" not in scoped
+
+    def test_does_not_mutate_input(self, web_app_config):
+        before = yaml.safe_dump(web_app_config)
+        dokploy.scope_config(web_app_config, ["web"])
+        assert yaml.safe_dump(web_app_config) == before
+
+    def test_unknown_app_exits(self, web_app_config, capsys):
+        with pytest.raises(SystemExit) as exc:
+            dokploy.scope_config(web_app_config, ["web", "nope"])
+        assert exc.value.code == 1
+        assert "nope" in capsys.readouterr().out
+
+
+class TestCliAppScope:
+    @pytest.fixture
+    def run_cli(self, tmp_path, web_app_config, monkeypatch):
+        monkeypatch.setenv("DOKPLOY_API_KEY", "key")
+        monkeypatch.setenv("DOKPLOY_URL", "https://dokploy.test")
+
+        def _run(*argv):
+            seen: dict = {}
+            with (
+                patch.object(sys, "argv", ["ic", "--env", "dev", *argv]),
+                patch("icarus.cli.find_repo_root", return_value=tmp_path),
+                patch("icarus.cli.load_config", return_value=web_app_config),
+                patch("icarus.cli.cmd_plan", lambda client, cfg, *a, **kw: seen.update(cfg=cfg)),
+                patch("icarus.cli.cmd_apply", lambda repo_root, client, cfg, *a, **kw: seen.update(cfg=cfg)),
+            ):
+                dokploy.main()
+            return seen
+
+        return _run
+
+    def test_plan_scopes_to_repeated_app_flags(self, run_cli):
+        seen = run_cli("plan", "--app", "web", "--app", "worker")
+        assert [a["name"] for a in seen["cfg"]["apps"]] == ["web", "worker"]
+
+    def test_apply_scopes_to_app_flag(self, run_cli):
+        seen = run_cli("apply", "--app", "web")
+        assert [a["name"] for a in seen["cfg"]["apps"]] == ["web"]
+
+    def test_no_app_flag_keeps_every_app(self, run_cli, web_app_config):
+        seen = run_cli("plan")
+        assert len(seen["cfg"]["apps"]) == len(web_app_config["apps"])
+
+    def test_unknown_app_exits(self, run_cli):
+        with pytest.raises(SystemExit) as exc:
+            run_cli("plan", "--app", "nope")
+        assert exc.value.code == 1
+
+    def test_app_flag_rejected_on_other_commands(self, run_cli):
+        with pytest.raises(SystemExit) as exc:
+            run_cli("env", "--app", "web")
+        assert exc.value.code == 2
+
+
 class TestResolveRefs:
     def test_single_ref(self, sample_state):
         result = dokploy.resolve_refs("redis://{redis}:6379/0", sample_state)
@@ -319,6 +392,46 @@ class TestResolveEnvForPush:
         result = dokploy.resolve_env_for_push(env_file, [])
         assert "# comment" not in result
         assert "FOO=bar" in result
+
+
+class TestResolveEnvFile:
+    @pytest.fixture(autouse=True)
+    def _clean_env(self, monkeypatch):
+        for var in ("DOTENV_FILE", "DOPPLER_PROJECT", "DOPPLER_CONFIG"):
+            monkeypatch.delenv(var, raising=False)
+
+    def test_defaults_to_repo_root_env(self, tmp_path):
+        assert dokploy.resolve_env_file(tmp_path) == tmp_path / ".env"
+
+    def test_dotenv_file_var_overrides_default(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("DOTENV_FILE", str(tmp_path / "custom.env"))
+        assert dokploy.resolve_env_file(tmp_path) == tmp_path / "custom.env"
+
+    def test_override_wins_over_dotenv_file_var(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("DOTENV_FILE", str(tmp_path / "custom.env"))
+        override = tmp_path / ".env.prod"
+        assert dokploy.resolve_env_file(tmp_path, override) == override
+
+    def test_doppler_session_without_explicit_file_exits(self, tmp_path, monkeypatch, capsys):
+        """Under doppler run, falling back to the default .env could push dev values."""
+        monkeypatch.setenv("DOPPLER_PROJECT", "proj")
+        monkeypatch.setenv("DOPPLER_CONFIG", "prod")
+        with pytest.raises(SystemExit) as exc:
+            dokploy.resolve_env_file(tmp_path)
+        assert exc.value.code == 1
+        assert "--env-file" in capsys.readouterr().out
+
+    def test_doppler_session_accepts_override(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("DOPPLER_PROJECT", "proj")
+        monkeypatch.setenv("DOPPLER_CONFIG", "prod")
+        override = tmp_path / ".env.doppler"
+        assert dokploy.resolve_env_file(tmp_path, override) == override
+
+    def test_doppler_session_accepts_dotenv_file_var(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("DOPPLER_PROJECT", "proj")
+        monkeypatch.setenv("DOPPLER_CONFIG", "prod")
+        monkeypatch.setenv("DOTENV_FILE", str(tmp_path / ".env.doppler"))
+        assert dokploy.resolve_env_file(tmp_path) == tmp_path / ".env.doppler"
 
 
 class TestLoadSaveState:
@@ -2736,6 +2849,65 @@ class TestComputePlanEnvChanges:
         assert "added" in app_env[0]["attrs"]
         assert "removed" in app_env[0]["attrs"]
 
+    def _plan_env_changes(self, tmp_path, web_app_config, **plan_kwargs):
+        cfg = dokploy.merge_env_overrides(web_app_config, "dev")
+        state = _make_plan_state(cfg["apps"])
+        state_file = tmp_path / ".dokploy-state" / "dev.json"
+        state_file.parent.mkdir(parents=True)
+        state_file.write_text(json.dumps(state))
+        (tmp_path / ".env").write_text("DEV_ONLY=1\n")
+        (tmp_path / ".env.prod").write_text("APP_SECRET=hunter2\n")
+
+        def mock_get(endpoint, params=None):
+            if endpoint == "project.all":
+                return [{"projectId": "proj-123"}]
+            if endpoint == "application.one":
+                return {"applicationId": params["applicationId"], "env": "APP_SECRET=hunter2\n"}
+            if endpoint == "compose.one":
+                return {"composeId": params["composeId"], "env": ""}
+            if endpoint == "schedule.list":
+                return []
+            return {}
+
+        client = MagicMock()
+        client.get.side_effect = mock_get
+        changes = dokploy.compute_plan(client, cfg, state_file, tmp_path, **plan_kwargs)
+        targets = set(cfg["project"]["env_targets"])
+        return [c for c in changes if c["resource_type"] == "environment" and c["name"] in targets]
+
+    def test_env_file_override_replaces_default_env(self, tmp_path, web_app_config):
+        """Plan diffs the --env-file that apply would push, not <repo>/.env."""
+        changes = self._plan_env_changes(tmp_path, web_app_config, env_file_override=tmp_path / ".env.prod")
+        assert changes == []
+
+    def test_dotenv_file_var_replaces_default_env(self, tmp_path, web_app_config, monkeypatch):
+        monkeypatch.setenv("DOTENV_FILE", str(tmp_path / ".env.prod"))
+        changes = self._plan_env_changes(tmp_path, web_app_config)
+        assert changes == []
+
+    def test_default_env_still_used_without_override(self, tmp_path, web_app_config, monkeypatch):
+        monkeypatch.delenv("DOTENV_FILE", raising=False)
+        changes = self._plan_env_changes(tmp_path, web_app_config)
+        assert changes
+        assert "DEV_ONLY" in changes[0]["attrs"]["added"]
+
+
+class TestCmdPlanEnvSource:
+    def test_prints_env_file_used_for_env_targets(self, tmp_path, web_app_config, capsys, monkeypatch):
+        monkeypatch.delenv("DOTENV_FILE", raising=False)
+        cfg = dokploy.merge_env_overrides(web_app_config, "dev")
+        override = tmp_path / ".env.prod"
+        with patch("icarus.plan.compute_plan", return_value=[]):
+            dokploy.cmd_plan(MagicMock(), cfg, tmp_path / "dev.json", tmp_path, env_file_override=override)
+        assert f"env source: {override}" in capsys.readouterr().out
+
+    def test_omitted_without_env_targets(self, tmp_path, minimal_config, capsys):
+        cfg = dokploy.merge_env_overrides(minimal_config, "dev")
+        cfg["project"].pop("env_targets", None)
+        with patch("icarus.plan.compute_plan", return_value=[]):
+            dokploy.cmd_plan(MagicMock(), cfg, tmp_path / "dev.json", tmp_path)
+        assert "env source" not in capsys.readouterr().out
+
 
 class TestComputePlanScheduleChanges:
     """When schedules differ, plan shows creates/updates/deletes."""
@@ -3140,6 +3312,57 @@ class TestDomainReconciliation:
         assert create_calls[0][0][1]["serviceName"] == "web"
         assert result["compose.example.com"]["domainId"] == "d1"
 
+    def test_reconcile_skips_update_when_only_unset_keys_differ(self):
+        """Path keys the config leaves unset keep Dokploy's default and do not trigger an update."""
+        existing = [
+            {
+                "domainId": "d1",
+                "host": "app.example.com",
+                "port": 80,
+                "https": True,
+                "certificateType": "letsencrypt",
+                "path": "/",
+                "internalPath": "/",
+                "stripPath": False,
+            },
+        ]
+        desired = [{"host": "app.example.com", "port": 80, "https": True, "certificateType": "letsencrypt"}]
+        client = MagicMock()
+
+        dokploy.reconcile_domains(client, "app-1", existing, desired)
+
+        assert [c for c in client.post.call_args_list if c[0][0] == "domain.update"] == []
+
+    def test_reconcile_updates_when_set_path_key_differs(self):
+        existing = [
+            {
+                "domainId": "d1",
+                "host": "app.example.com",
+                "port": 80,
+                "https": True,
+                "certificateType": "letsencrypt",
+                "path": "/",
+                "internalPath": "/",
+                "stripPath": False,
+            },
+        ]
+        desired = [
+            {
+                "host": "app.example.com",
+                "port": 80,
+                "https": True,
+                "certificateType": "letsencrypt",
+                "internalPath": "/api",
+            },
+        ]
+        client = MagicMock()
+
+        dokploy.reconcile_domains(client, "app-1", existing, desired)
+
+        update_calls = [c for c in client.post.call_args_list if c[0][0] == "domain.update"]
+        assert len(update_calls) == 1
+        assert update_calls[0][0][1]["internalPath"] == "/api"
+
     def test_same_host_different_path_creates_both(self):
         """reconcile_domains treats same host + different path as distinct domains."""
         existing = []
@@ -3316,6 +3539,39 @@ class TestPlanDomainChanges:
         updated = [c for c in domain_changes if c["action"] == "update"]
         assert len(updated) == 1
         assert updated[0]["name"] == "kept.example.com"
+
+    def _plan_domain_changes(self, tmp_path, desired_domain, remote_domain):
+        state = {"projectId": "proj-1", "apps": {"web": {"applicationId": "app-1"}}}
+        cfg = {
+            "project": {"name": "test", "description": "test"},
+            "apps": [{"name": "web", "source": {"type": "docker", "image": "nginx"}, "domain": desired_domain}],
+        }
+        client = MagicMock()
+        client.get.side_effect = lambda endpoint, params=None: (
+            {"env": ""} if endpoint == "application.one" else [remote_domain] if endpoint == "domain.byApplicationId" else {}
+        )
+        changes: list[dict] = []
+        dokploy._plan_redeploy(client, cfg, state, tmp_path, changes)
+        return [c for c in changes if c["resource_type"] == "domain"]
+
+    def test_plan_ignores_unset_path_keys(self, tmp_path):
+        """Path keys the config leaves unset keep Dokploy's default and are not reported."""
+        desired = {"host": "app.example.com", "port": 80, "https": True, "certificateType": "letsencrypt"}
+        remote = {**desired, "domainId": "d1", "path": "/", "internalPath": "/", "stripPath": False}
+        assert self._plan_domain_changes(tmp_path, desired, remote) == []
+
+    def test_plan_reports_set_path_key_that_differs(self, tmp_path):
+        desired = {
+            "host": "app.example.com",
+            "port": 80,
+            "https": True,
+            "certificateType": "letsencrypt",
+            "internalPath": "/api",
+        }
+        remote = {**desired, "domainId": "d1", "internalPath": "/", "path": "/", "stripPath": False}
+        changes = self._plan_domain_changes(tmp_path, desired, remote)
+        assert len(changes) == 1
+        assert changes[0]["attrs"] == {"internalPath": ("/", "/api")}
 
     def test_plan_same_host_different_path_creates_missing_only(self, tmp_path):
         """_plan_redeploy treats same host + different path as distinct domains.

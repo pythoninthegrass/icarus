@@ -479,25 +479,32 @@ The `DOKPLOY_SSH_*` variables are only required for the `logs` and `exec` comman
 
 ### Env File Selection
 
-By default, `ic env` reads `.env` from the repo root. You can override this with:
+`ic env`, `ic apply`, `ic trigger`, and `ic plan` all read the same env file, chosen in this order:
 
-- **`--env-file <path>`** CLI flag (highest priority)
-- **`DOTENV_FILE`** environment variable (follows the [python-decouple convention](https://github.com/HBNetwork/python-decouple#how-do-i-use-it-with-django))
+1. **`--env-file <path>`** CLI flag (highest priority)
+2. **`DOTENV_FILE`** environment variable (follows the [python-decouple convention](https://github.com/HBNetwork/python-decouple#how-do-i-use-it-with-django))
+3. **`<repo>/.env`**
 
 ```bash
-ic --env prod --env-file .env.prod env     # explicit file path
+ic --env prod --env-file .env.prod plan    # explicit file path
 DOTENV_FILE=.env.prod ic --env prod env    # via env var
 ```
 
+`ic plan` prints `env source: <path>` above the plan whenever the project has `env_targets`, so you can see which file it diffed.
+
 ### Process Environment Override
 
-When pushing env vars, `ic env` resolves each value through python-decouple's `Config`, which checks `os.environ` before the `.env` file. This means process environment variables automatically override file values for matching keys:
+When pushing env vars, icarus resolves each value through python-decouple's `Config`, which checks `os.environ` before the env file, so process environment variables override file values for matching keys. The key set always comes from the file; stray process env vars (like `PATH` or `HOME`) are never included.
+
+### Doppler
+
+Under `doppler run` (when `DOPPLER_PROJECT` and `DOPPLER_CONFIG` are set), icarus refuses to fall back to `<repo>/.env`, because a local dev file would decide which keys get pushed. Mount the Doppler secrets as an ephemeral env file and pass it explicitly:
 
 ```bash
-doppler run -- ic --env prod env    # Doppler secrets override .env values
+doppler run --mount .env.doppler --format env -- ic --env prod --env-file .env.doppler plan
 ```
 
-Only keys present in the `.env` file are pushed — stray process env vars (like `PATH` or `HOME`) are never included.
+The mount is a named pipe that Doppler removes when the command exits, and it can be read repeatedly. Add `.env.doppler` to `.gitignore`. Use `ENV_EXCLUDES` (below) to keep keys that are not runtime config, such as CI signing secrets, out of the pushed env.
 
 ### Env Exclusion Patterns
 
@@ -516,6 +523,22 @@ Rules:
 - Both `ENV_EXCLUDES` and `ENV_EXCLUDE_PREFIXES` are read and merged with the built-in defaults.
 
 Example: `ENV_EXCLUDES=DEV,DEBUG,MY_SECRET_` excludes the exact keys `DEV` and `DEBUG`, plus any key starting with `MY_SECRET_`.
+
+## Scoping to Specific Apps
+
+`ic plan` and `ic apply` accept `--app NAME` (repeatable) to limit creates, updates, reconcile steps, env pushes, and deploys to the named apps. Naming an app that is not in `dokploy.yml` is an error.
+
+```bash
+ic --env prod plan --app site                 # preview one app
+ic --env prod apply --app web --app worker    # apply two apps
+```
+
+Scoping details:
+
+- `env_targets` and `deploy_order` are narrowed to the named apps; waves left empty are dropped.
+- `database` entries are skipped. Shared sections (`registries`, `destinations`, `certificates`) are still reconciled.
+- `{app_name}` references still resolve against the full state file, so an env template can point at an app that is not in scope.
+- Without `--app`, every app is processed.
 
 ## Schema Directive
 

@@ -21,6 +21,7 @@ from icarus.payloads import (
     build_volume_backup_payload,
     database_endpoint,
     database_id_key,
+    domain_diffs,
     is_compose,
     resolve_registry_id,
 )
@@ -381,10 +382,7 @@ def reconcile_domains(
         if key in existing_by_key:
             ex = existing_by_key[key]
             domain_id = ex["domainId"]
-            needs_update = any(
-                payload.get(k) != ex.get(k)
-                for k in ("port", "https", "certificateType", "customCertResolver", "path", "internalPath", "stripPath")
-            )
+            needs_update = bool(domain_diffs(payload, ex)) or payload.get("customCertResolver") != ex.get("customCertResolver")
             if needs_update:
                 update_payload = {k: v for k, v in payload.items() if k not in ("applicationId", "composeId", "domainType")}
                 update_payload["domainId"] = domain_id

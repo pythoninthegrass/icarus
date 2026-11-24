@@ -174,6 +174,21 @@ def sync_service_envs(state: dict, app_envs: dict[str, str]) -> None:
     if not app_envs:
         return
 
+    # Compose apps are filtered out before connecting: an SSH session is only
+    # worth opening if some application app still needs env written into its spec.
+    targets: list[tuple[str, dict[str, str]]] = []
+    for name, env_content in app_envs.items():
+        app_info = state["apps"].get(name, {})
+        if app_info.get("source") == "compose":
+            continue
+        app_name = app_info.get("appName", "")
+        env_vars = parse_env_to_dict(env_content)
+        if app_name and env_vars:
+            targets.append((app_name, env_vars))
+    if not targets:
+        print("  Sync: nothing to sync (no application apps with env vars)")
+        return
+
     host: str = config("DOKPLOY_SSH_HOST", default="")  # type: ignore[assignment]
     if not host:
         print("  Sync: skipping (DOKPLOY_SSH_HOST not set)")
@@ -185,16 +200,7 @@ def sync_service_envs(state: dict, app_envs: dict[str, str]) -> None:
 
     ssh = _open_ssh(host, user or "root", ssh_port)
     try:
-        for name, env_content in app_envs.items():
-            app_info = state["apps"].get(name, {})
-            if app_info.get("source") == "compose":
-                continue
-            app_name = app_info.get("appName", "")
-            if not app_name:
-                continue
-            env_vars = parse_env_to_dict(env_content)
-            if not env_vars:
-                continue
+        for app_name, env_vars in targets:
             update_service_env(ssh, app_name, env_vars)
             print(f"  Synced env into service {app_name}")
     finally:

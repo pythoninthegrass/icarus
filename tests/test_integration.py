@@ -6,7 +6,7 @@ import json
 import pytest
 import respx
 import yaml
-from icarus import commands as icarus_commands
+from icarus import commands as icarus_commands, ssh as icarus_ssh
 from pathlib import Path
 from unittest.mock import patch
 
@@ -525,6 +525,34 @@ class TestCmdEnv:
         state_file.parent.mkdir(parents=True, exist_ok=True)
         state_file.write_text(json.dumps(state))
 
+    def test_compose_custom_env_when_server_reports_null(self, tmp_path, minimal_config):
+        """A compose app never deployed yet reports env: null; merging must survive it."""
+        app = minimal_config["apps"][0]
+        app["source"] = "compose"
+        app["composeFile"] = "docker-compose.yml"
+        app["composeType"] = "docker-compose"
+        app["env"] = "FOO=bar"
+
+        state = {
+            "projectId": "proj-1",
+            "environmentId": "env-1",
+            "apps": {"app": {"composeId": "cmp-1", "appName": "compose-gen", "source": "compose"}},
+        }
+        state_file = tmp_path / ".dokploy-state" / "test.json"
+        self._write_state(state_file, state)
+
+        router = respx.Router()
+        router.get(f"{BASE_URL}/api/compose.one").mock(return_value=httpx.Response(200, json={"env": None}))
+        update_route = router.post(f"{BASE_URL}/api/compose.update").mock(return_value=httpx.Response(200, json={}))
+        client = _make_client(router)
+
+        dokploy.cmd_env(client, minimal_config, state_file, tmp_path)
+
+        assert update_route.called
+        payload = json.loads(update_route.calls[0].request.content)
+        assert payload["composeId"] == "cmp-1"
+        assert payload["env"] == "FOO=bar"
+
     def test_happy_path(self, tmp_path, minimal_config):
         """Pushes filtered .env to env_targets."""
         # Add env_targets to config
@@ -662,6 +690,39 @@ class TestCmdTrigger:
     def _write_state(self, state_file: Path, state: dict) -> None:
         state_file.parent.mkdir(parents=True, exist_ok=True)
         state_file.write_text(json.dumps(state))
+
+    def test_compose_only_redeploy_never_opens_ssh(self, tmp_path, minimal_config, monkeypatch):
+        """Compose apps re-read env on redeploy, so a compose-only project needs no SSH."""
+        app = minimal_config["apps"][0]
+        app["source"] = "compose"
+        app["composeFile"] = "docker-compose.yml"
+        app["env"] = "FOO=bar"
+
+        state = {
+            "projectId": "proj-1",
+            "environmentId": "env-1",
+            "apps": {"app": {"composeId": "cmp-1", "appName": "compose-gen", "source": "compose"}},
+        }
+        state_file = tmp_path / ".dokploy-state" / "test.json"
+        self._write_state(state_file, state)
+
+        monkeypatch.setattr(
+            icarus_ssh, "config", lambda key, default=None: "203.0.113.10" if key == "DOKPLOY_SSH_HOST" else default
+        )
+
+        def _no_ssh(*args, **kwargs):
+            raise AssertionError("sync_service_envs opened SSH for a compose-only project")
+
+        monkeypatch.setattr(icarus_ssh, "_open_ssh", _no_ssh)
+
+        router = respx.Router()
+        router.get(f"{BASE_URL}/api/deployment.all").mock(return_value=httpx.Response(200, json=[]))
+        deploy_route = router.post(f"{BASE_URL}/api/compose.deploy").mock(return_value=httpx.Response(200, json={}))
+        client = _make_client(router)
+
+        dokploy.cmd_trigger(client, minimal_config, state_file, repo_root=tmp_path, redeploy=True)
+
+        assert deploy_route.called
 
     def test_deploys_in_wave_order(self, tmp_path, web_app_config):
         """Deploy calls application.deploy for each app in wave order."""

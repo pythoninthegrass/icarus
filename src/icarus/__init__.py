@@ -32,6 +32,7 @@ from icarus.env import (
     merge_app_env,
     parse_env_to_dict,
     resolve_app_envs,
+    resolve_env_file,
     resolve_env_for_push,
     resolve_refs,
 )
@@ -61,6 +62,7 @@ from icarus.payloads import (
     build_volume_backup_payload,
     database_endpoint,
     database_id_key,
+    domain_diffs,
     is_compose,
     parse_cpu_nanos,
     parse_duration_nanos,
@@ -103,6 +105,7 @@ from icarus.schema import (
     get_state_file,
     load_config,
     merge_env_overrides,
+    scope_config,
     validate_config,
     validate_env_references,
 )

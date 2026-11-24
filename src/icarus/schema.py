@@ -78,3 +78,27 @@ def merge_env_overrides(cfg: dict, env_name: str) -> dict:
             app_def.update(app_overrides[name])
 
     return merged
+
+
+def scope_config(cfg: dict, app_names: list[str]) -> dict:
+    """Return a copy of cfg limited to the named apps, so plan and apply touch nothing else.
+
+    Shared sections (registries, destinations, certificates) are kept; databases are dropped.
+    """
+    known = {a["name"] for a in cfg["apps"]}
+    unknown = sorted(set(app_names) - known)
+    if unknown:
+        print(f"ERROR: --app references unknown app(s): {', '.join(unknown)}")
+        sys.exit(1)
+
+    keep = set(app_names)
+    scoped = copy.deepcopy(cfg)
+    scoped["apps"] = [a for a in scoped["apps"] if a["name"] in keep]
+    scoped.pop("database", None)
+    project = scoped["project"]
+    if "env_targets" in project:
+        project["env_targets"] = [n for n in project["env_targets"] if n in keep]
+    if "deploy_order" in project:
+        waves = ([n for n in wave if n in keep] for wave in project["deploy_order"])
+        project["deploy_order"] = [wave for wave in waves if wave]
+    return scoped

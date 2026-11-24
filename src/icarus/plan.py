@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from icarus.client import load_state, validate_state
-from icarus.env import filter_env, get_env_excludes, resolve_refs
+from icarus.env import get_env_excludes, resolve_env_file, resolve_env_for_push, resolve_refs
 from icarus.payloads import (
     DATABASE_DEFAULTS,
     build_app_settings_payload,
@@ -10,6 +10,7 @@ from icarus.payloads import (
     build_redirect_payload,
     build_schedule_payload,
     build_security_payload,
+    domain_diffs,
     is_compose,
 )
 from icarus.reconcile import _domain_key
@@ -184,7 +185,7 @@ def _plan_new_app(app_def: dict, changes: list[dict]) -> None:
         )
 
 
-def _plan_initial_setup(cfg: dict, repo_root: Path, changes: list[dict]) -> None:
+def _plan_initial_setup(cfg: dict, repo_root: Path, changes: list[dict], env_file_override: Path | None = None) -> None:
     """Populate changes list for a fresh setup (no state exists)."""
     project_cfg = cfg["project"]
     changes.append(
@@ -219,11 +220,9 @@ def _plan_initial_setup(cfg: dict, repo_root: Path, changes: list[dict]) -> None
 
     env_targets = cfg["project"].get("env_targets", [])
     if env_targets:
-        env_file = repo_root / ".env"
+        env_file = resolve_env_file(repo_root, env_file_override)
         if env_file.exists():
-            raw_env = env_file.read_text()
-            exclude_prefixes = get_env_excludes()
-            filtered = filter_env(raw_env, exclude_prefixes)
+            filtered = resolve_env_for_push(env_file, get_env_excludes())
             keys = _env_keys(filtered)
             for target_name in env_targets:
                 changes.append(
@@ -332,17 +331,17 @@ def _plan_redeploy(
     state: dict,
     repo_root: Path,
     changes: list[dict],
+    env_file_override: Path | None = None,
 ) -> None:
     """Populate changes list by diffing remote state against desired config."""
     apps_by_name = {a["name"]: a for a in cfg["apps"]}
     env_targets = cfg["project"].get("env_targets", [])
 
-    env_file = repo_root / ".env"
     filtered_env: str | None = None
-    if env_targets and env_file.exists():
-        raw_env = env_file.read_text()
-        exclude_prefixes = get_env_excludes()
-        filtered_env = filter_env(raw_env, exclude_prefixes)
+    if env_targets:
+        env_file = resolve_env_file(repo_root, env_file_override)
+        if env_file.exists():
+            filtered_env = resolve_env_for_push(env_file, get_env_excludes())
 
     for app_def in cfg["apps"]:
         if app_def["name"] not in state["apps"]:
@@ -408,12 +407,7 @@ def _plan_redeploy(
                 label = host if path == "/" else f"{host}{path}"
                 if (host, path) in existing_by_key:
                     ex = existing_by_key[(host, path)]
-                    diffs: dict = {}
-                    for key in ("port", "https", "certificateType", "path", "internalPath", "stripPath"):
-                        old_val = ex.get(key)
-                        new_val = dom.get(key)
-                        if old_val != new_val:
-                            diffs[key] = (old_val, new_val)
+                    diffs = domain_diffs(dom, ex)
                     if diffs:
                         changes.append(
                             {
@@ -920,20 +914,21 @@ def compute_plan(
     cfg: dict,
     state_file: Path,
     repo_root: Path,
+    env_file_override: Path | None = None,
 ) -> list[dict]:
     """Compute the list of changes that apply would make, without executing them."""
     changes: list[dict] = []
 
     if not state_file.exists():
-        _plan_initial_setup(cfg, repo_root, changes)
+        _plan_initial_setup(cfg, repo_root, changes, env_file_override)
         return changes
 
     state = load_state(state_file)
     if not validate_state(client, state):
-        _plan_initial_setup(cfg, repo_root, changes)
+        _plan_initial_setup(cfg, repo_root, changes, env_file_override)
         return changes
 
-    _plan_redeploy(client, cfg, state, repo_root, changes)
+    _plan_redeploy(client, cfg, state, repo_root, changes, env_file_override)
     return changes
 
 
@@ -993,7 +988,10 @@ def cmd_plan(
     cfg: dict,
     state_file: Path,
     repo_root: Path,
+    env_file_override: Path | None = None,
 ) -> None:
     """Show what changes apply would make without executing them."""
-    changes = compute_plan(client, cfg, state_file, repo_root)
+    changes = compute_plan(client, cfg, state_file, repo_root, env_file_override)
+    if cfg["project"].get("env_targets"):
+        print(f"env source: {resolve_env_file(repo_root, env_file_override)}")
     print_plan(changes)

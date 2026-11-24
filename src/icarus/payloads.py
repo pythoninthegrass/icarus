@@ -257,6 +257,18 @@ def build_domain_payload(resource_id: str, dom: dict, *, compose: bool = False) 
     return payload
 
 
+DOMAIN_COMPARE_KEYS = ("port", "https", "certificateType", "path", "internalPath", "stripPath")
+
+
+def domain_diffs(desired: dict, existing: dict) -> dict[str, tuple]:
+    """Map key -> (existing, desired) for desired domain keys that differ from the live domain.
+
+    Keys the config leaves unset are skipped: they keep Dokploy's default, so comparing
+    them against the live value reports a change apply never makes.
+    """
+    return {k: (existing.get(k), desired[k]) for k in DOMAIN_COMPARE_KEYS if k in desired and existing.get(k) != desired[k]}
+
+
 def build_app_settings_payload(app_id: str, app_def: dict) -> dict | None:
     """Build payload for application.update (autoDeploy, replicas, resources,
     healthCheck, restartPolicy).
