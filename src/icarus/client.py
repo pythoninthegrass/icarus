@@ -47,6 +47,28 @@ class DokployClient:
         resp = self._request("GET", path, params=params)
         return resp.json()
 
+    def read_logs(self, app_info: dict, *, container_id: str = "", tail: int = 100) -> str:
+        """Return a container's log text, fetched over the API instead of SSH.
+
+        Dokploy addresses a compose replica by compose id plus container id and an
+        application by application id alone, and answers with the log text as a
+        bare JSON string.
+
+        Raises:
+            httpx.HTTPStatusError: the server has no such endpoint or rejected the ids.
+            TypeError: the endpoint answered with something other than log text.
+        """
+        if app_info.get("source") == "compose":
+            endpoint = "compose.readLogs"
+            params = {"composeId": app_info["composeId"], "containerId": container_id, "tail": tail}
+        else:
+            endpoint = "application.readLogs"
+            params = {"applicationId": app_info["applicationId"], "tail": tail}
+        body = self.get(endpoint, params)
+        if not isinstance(body, str):
+            raise TypeError(f"{endpoint} returned {type(body).__name__}, not log text")
+        return body
+
     def post(self, path: str, payload: dict | None = None) -> Any:
         """POST and return the decoded body.
 

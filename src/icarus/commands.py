@@ -792,11 +792,15 @@ def cmd_env(
             # Dokploy returns "env": null on a compose app that has never had env pushed,
             # and dict.get's default only covers a missing key, so coerce explicitly.
             prev_env = existing.get("env") or ""
-            merged = (prev_env.rstrip("\n") + "\n" + resolved).lstrip("\n")
-            client.post(
-                "compose.update",
-                {"composeId": compose_id, "env": merged},
-            )
+            # Upsert by key: appending would add a copy every apply and leave stale
+            # values, such as the previous hostname of a renamed app, as earlier duplicates.
+            merged = merge_app_env(prev_env, resolved).lstrip("\n")
+            payload = {"composeId": compose_id, "env": merged}
+            if app_def.get("sourceType") != "github":
+                # Dokploy deploys the copy it stores, not the file in the repo, so an
+                # authored compose edit never lands unless it travels with the env.
+                payload.update(build_compose_update_payload(compose_id, app_def, None, None, repo_root))
+            client.post("compose.update", payload)
         else:
             app_id = app_info["applicationId"]
             create_env_file = app_def.get("create_env_file", False)
@@ -1115,11 +1119,26 @@ def cmd_git_provider_remove(client: DokployClient, provider_id: str) -> None:
     print("  Removed.")
 
 
+def _api_logs_or_none(client: DokployClient, app_info: dict, container_id: str, tail: int) -> str | None:
+    """Fetch logs through the API, or None when the server cannot serve them.
+
+    Dokploy before 0.31 has no readLogs endpoints, and a container replaced since
+    the state file was written will not be known to them; either way the caller
+    falls back to docker-py over SSH.
+    """
+    try:
+        return client.read_logs(app_info, container_id=container_id, tail=tail)
+    except Exception as exc:
+        print(f"  API logs unavailable ({type(exc).__name__}: {exc}); falling back to SSH", file=sys.stderr)
+        return None
+
+
 def cmd_logs(client: DokployClient, state_file: Path, app: str | None, follow: bool, tail: int, exited: bool) -> None:
-    """Fetch container logs via docker-py over SSH."""
+    """Fetch container logs, via the API when it can serve them and SSH otherwise."""
     state = load_state(state_file)
-    dokploy_name = resolve_app_for_exec(state, app)
-    ssh_cfg = get_ssh_config()
+    name = resolve_app_name(state, app)
+    app_info = state["apps"][name]
+    dokploy_name = app_info["appName"]
 
     containers = get_containers(client, dokploy_name)
     container_info = select_container(containers, exited=exited)
@@ -1128,6 +1147,17 @@ def cmd_logs(client: DokployClient, state_file: Path, app: str | None, follow: b
         file=sys.stderr,
     )
 
+    # readLogs returns one snapshot with tail capped at 1..10000, so -f cannot
+    # stream and -n 0 cannot mean "everything"; both keep the docker-py path.
+    if not follow and tail > 0:
+        logs = _api_logs_or_none(client, app_info, container_info["containerId"], tail)
+        if logs is not None:
+            text = logs if logs.endswith("\n") else logs + "\n"
+            sys.stdout.buffer.write(text.encode("utf-8", "replace"))
+            sys.stdout.buffer.flush()
+            return
+
+    ssh_cfg = get_ssh_config()
     docker_client = get_docker_client(ssh_cfg)
     try:
         container = docker_client.containers.get(container_info["containerId"])

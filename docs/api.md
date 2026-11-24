@@ -139,11 +139,15 @@ Notification and lifecycle verbs are noted above as future candidates should ica
 
 ## Container & Log Access
 
-The Dokploy REST API does **not** expose a container logs endpoint. The UI uses WebSocket/tRPC subscriptions for real-time log streaming, which is not available via the REST API.
+Dokploy 0.31 added REST log endpoints and `logs` prefers them: `compose.readLogs` takes `composeId` plus `containerId`, `application.readLogs` takes `applicationId`, and each replies with the log text as a bare JSON string. They return one snapshot with `tail` capped at 1..10000, so `-f` (streaming) and `-n 0` (every line) still need `docker-py`, and so does a server too old to have the endpoints. The UI's real-time streaming uses WebSocket/tRPC subscriptions, which the REST API does not expose.
 
-Instead, the `logs` and `exec` commands use `docker-py` with SSH transport (`ssh://user@host`) to connect to the Docker daemon on the Dokploy host directly. Container IDs are resolved via the REST API, then docker-py fetches logs or runs exec against those containers.
+The `exec` command always uses `docker-py` with SSH transport (`ssh://user@host`) to connect to the Docker daemon on the Dokploy host directly. Container IDs are resolved via the REST API for both commands, then docker-py fetches logs or runs exec against those containers.
 
 ### Endpoints Used
+
+- **`compose.readLogs`**: GET with `?composeId=<id>&containerId=<id>&tail=<n>`. Returns log text for one container of a compose app. Optional `since` (`all` or `<n>[smhd]`) and `search`.
+
+- **`application.readLogs`**: GET with `?applicationId=<id>&tail=<n>`. Same for a standalone application; no container id needed.
 
 - **`docker.getContainersByAppNameMatch`**: GET with `?appName=<appName>`. Returns a list of containers (running + exited) matching the Dokploy-assigned appName. Each entry has `containerId`, `name`, and `state` (`running`, `exited`, `created`).
 

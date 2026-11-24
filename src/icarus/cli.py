@@ -75,10 +75,10 @@ def main() -> None:
     sub.add_parser("destroy", help="Delete project and state file")
     sub.add_parser("import", help="Import existing project from server")
 
-    logs_parser = sub.add_parser("logs", help="View container logs via SSH")
+    logs_parser = sub.add_parser("logs", help="View container logs via the API, falling back to SSH")
     logs_parser.add_argument("app", nargs="?", default=None, help="App name (auto-selects if only one)")
-    logs_parser.add_argument("-f", "--follow", action="store_true", help="Follow log output")
-    logs_parser.add_argument("-n", "--tail", type=int, default=100, help="Number of lines (default: 100, 0 for all)")
+    logs_parser.add_argument("-f", "--follow", action="store_true", help="Follow log output (requires SSH)")
+    logs_parser.add_argument("-n", "--tail", type=int, default=100, help="Number of lines (default: 100, 0 for all over SSH)")
     logs_parser.add_argument("--exited", action="store_true", help="Pick from all containers (including exited)")
 
     exec_parser = sub.add_parser("exec", help="Execute command in container via SSH")
