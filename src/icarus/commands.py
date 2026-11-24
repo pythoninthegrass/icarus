@@ -792,7 +792,9 @@ def cmd_env(
             # Dokploy returns "env": null on a compose app that has never had env pushed,
             # and dict.get's default only covers a missing key, so coerce explicitly.
             prev_env = existing.get("env") or ""
-            merged = (prev_env.rstrip("\n") + "\n" + resolved).lstrip("\n")
+            # Upsert by key: appending would add a copy every apply and leave stale
+            # values, such as the previous hostname of a renamed app, as earlier duplicates.
+            merged = merge_app_env(prev_env, resolved).lstrip("\n")
             client.post(
                 "compose.update",
                 {"composeId": compose_id, "env": merged},

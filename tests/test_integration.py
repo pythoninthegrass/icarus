@@ -527,6 +527,69 @@ class TestCmdEnv:
         state_file.parent.mkdir(parents=True, exist_ok=True)
         state_file.write_text(json.dumps(state))
 
+    def test_compose_custom_env_merge_collapses_duplicates_and_stale_values(self, tmp_path, minimal_config):
+        """Re-pushing env replaces values by key instead of appending another copy."""
+        app = minimal_config["apps"][0]
+        app["source"] = "compose"
+        app["composeFile"] = "docker-compose.yml"
+        app["env"] = "APP_BASE_URL=https://read.infinitecontent.io\nAPP_ALLOWED_HOSTS=read.infinitecontent.io"
+
+        state = {
+            "projectId": "proj-1",
+            "environmentId": "env-1",
+            "apps": {"app": {"composeId": "cmp-1", "appName": "compose-gen", "source": "compose"}},
+        }
+        state_file = tmp_path / ".dokploy-state" / "test.json"
+        self._write_state(state_file, state)
+
+        stale = (
+            "APP_BASE_URL=https://readeck.infinitecontent.io\n"
+            "APP_ALLOWED_HOSTS=readeck.infinitecontent.io\n"
+            "APP_BASE_URL=https://readeck.infinitecontent.io\n"
+            "APP_ALLOWED_HOSTS=readeck.infinitecontent.io\n"
+        )
+        router = respx.Router()
+        router.get(f"{BASE_URL}/api/compose.one").mock(return_value=httpx.Response(200, json={"env": stale}))
+        update_route = router.post(f"{BASE_URL}/api/compose.update").mock(return_value=httpx.Response(200, json={}))
+        client = _make_client(router)
+
+        dokploy.cmd_env(client, minimal_config, state_file, tmp_path)
+
+        env = json.loads(update_route.calls[0].request.content)["env"]
+        assert env.splitlines() == [
+            "APP_BASE_URL=https://read.infinitecontent.io",
+            "APP_ALLOWED_HOSTS=read.infinitecontent.io",
+        ]
+
+    def test_compose_custom_env_merge_preserves_unmanaged_keys(self, tmp_path, minimal_config):
+        """Keys Dokploy holds but dokploy.yml does not declare survive the push."""
+        app = minimal_config["apps"][0]
+        app["source"] = "compose"
+        app["composeFile"] = "docker-compose.yml"
+        app["env"] = "FOO=bar"
+
+        state = {
+            "projectId": "proj-1",
+            "environmentId": "env-1",
+            "apps": {"app": {"composeId": "cmp-1", "appName": "compose-gen", "source": "compose"}},
+        }
+        state_file = tmp_path / ".dokploy-state" / "test.json"
+        self._write_state(state_file, state)
+
+        router = respx.Router()
+        router.get(f"{BASE_URL}/api/compose.one").mock(
+            return_value=httpx.Response(200, json={"env": "TZ=America/Chicago\nFOO=stale\n"})
+        )
+        update_route = router.post(f"{BASE_URL}/api/compose.update").mock(return_value=httpx.Response(200, json={}))
+        client = _make_client(router)
+
+        dokploy.cmd_env(client, minimal_config, state_file, tmp_path)
+
+        env = json.loads(update_route.calls[0].request.content)["env"]
+        assert "TZ=America/Chicago" in env
+        assert env.count("FOO=") == 1
+        assert "FOO=bar" in env
+
     def test_compose_custom_env_when_server_reports_null(self, tmp_path, minimal_config):
         """A compose app never deployed yet reports env: null; merging must survive it."""
         app = minimal_config["apps"][0]
