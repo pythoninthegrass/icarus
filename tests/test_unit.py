@@ -2144,6 +2144,63 @@ class TestCleanupSkipsWhenAllSshVarsMissing:
         assert "dry run" in out.lower()
 
 
+class TestCleanupSkipsWhenSshUnreachable:
+    """An SSH host that can't be reached must degrade like an unset one, not fail the apply."""
+
+    _cfg = {
+        "apps": [{"name": "web", "domain": {"host": "example.com", "port": 80, "https": True, "certificateType": "letsencrypt"}}]
+    }
+    _state = {"apps": {"web": {"appName": "app-web-abc"}}}
+
+    def _ssh_host(self, monkeypatch, exc: Exception):
+        def fake_config(key, default=""):
+            if key == "DOKPLOY_SSH_HOST":
+                return "server.example.com"
+            return default
+
+        monkeypatch.setattr(icarus_ssh, "config", MagicMock(side_effect=fake_config))
+
+        def _raise(host, user, port):
+            raise exc
+
+        monkeypatch.setattr(icarus_ssh, "_open_ssh", _raise)
+
+    def test_stale_routes_skip_when_auth_fails(self, monkeypatch, capsys):
+        self._ssh_host(monkeypatch, icarus_ssh.paramiko.AuthenticationException("Authentication failed."))
+
+        dokploy.cleanup_stale_routes(self._state, self._cfg)
+
+        out = capsys.readouterr().out
+        assert "skipping" in out.lower()
+        assert "AuthenticationException" in out
+
+    def test_stale_routes_skip_when_host_unreachable(self, monkeypatch, capsys):
+        self._ssh_host(monkeypatch, OSError("[Errno 111] Connection refused"))
+
+        dokploy.cleanup_stale_routes(self._state, self._cfg)
+
+        assert "skipping" in capsys.readouterr().out.lower()
+
+    def test_orphaned_services_skip_when_auth_fails(self, monkeypatch, capsys):
+        self._ssh_host(monkeypatch, icarus_ssh.paramiko.AuthenticationException("Authentication failed."))
+
+        dokploy.cleanup_orphaned_services(self._state, {"app-web-abc"})
+
+        out = capsys.readouterr().out
+        assert "skipping" in out.lower()
+        assert "AuthenticationException" in out
+
+    def test_cleanup_orphans_finishes_when_auth_fails(self, monkeypatch, capsys):
+        """apply's orphan pass must not raise: the panel otherwise stays 'partially converged'."""
+        self._ssh_host(monkeypatch, icarus_ssh.paramiko.AuthenticationException("Authentication failed."))
+        monkeypatch.setattr(icarus_commands, "cleanup_orphaned_project_apps", lambda client, state, dry_run=False: None)
+        monkeypatch.setattr(icarus_commands, "collect_known_app_names", lambda client: {"app-web-abc"})
+
+        dokploy.cleanup_orphans(MagicMock(), self._cfg, self._state)
+
+        assert capsys.readouterr().out.count("skipping") == 2
+
+
 class TestConfirm:
     def test_yes_accepts(self, monkeypatch):
         """confirm returns True for a 'y' answer."""

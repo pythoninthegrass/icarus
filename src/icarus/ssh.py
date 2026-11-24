@@ -151,6 +151,20 @@ def _open_ssh(host: str, user: str, port: int) -> paramiko.SSHClient:
     return ssh
 
 
+def _open_ssh_or_none(host: str, user: str, port: int, *, label: str) -> paramiko.SSHClient | None:
+    """Open SSH for an optional host-level pass, returning None when the host can't serve it.
+
+    Only the connect is wrapped: an unreachable or unauthorized host is reported like an
+    unset DOKPLOY_SSH_HOST, while a command that fails after connecting still propagates.
+    """
+    try:
+        return _open_ssh(host, user, port)
+    except (paramiko.SSHException, OSError) as exc:
+        print(f"  {label}: skipping (SSH to {user}@{host}:{port} failed: {type(exc).__name__}: {exc})")
+        print(f"    Add {user}'s public key to {host}:~/.ssh/authorized_keys to enable this pass.")
+        return None
+
+
 def update_service_env(ssh: paramiko.SSHClient, app_name: str, env_vars: dict[str, str]) -> None:
     """Apply env vars into a running Docker swarm service via --env-add.
 
@@ -231,7 +245,9 @@ def cleanup_stale_routes(state: dict, cfg: dict, *, dry_run: bool = False) -> No
     ssh_user = user or "root"
     ssh_port = int(port) if port else 22
 
-    ssh = _open_ssh(host, ssh_user, ssh_port)
+    ssh = _open_ssh_or_none(host, ssh_user, ssh_port, label="Cleanup")
+    if ssh is None:
+        return
     try:
         traefik_files: dict[str, str] = {}
         file_list = _ssh_exec(ssh, f"ls {TRAEFIK_DYNAMIC_DIR}/*.yml 2>/dev/null")
@@ -280,7 +296,9 @@ def cleanup_orphaned_services(state: dict, known_app_names: set[str], *, dry_run
     tracked = {info["appName"] for info in state.get("apps", {}).values() if info.get("appName")}
     tracked |= {info["appName"] for info in state.get("database", {}).values() if info.get("appName")}
 
-    ssh = _open_ssh(host, user or "root", int(port) if port else 22)
+    ssh = _open_ssh_or_none(host, user or "root", int(port) if port else 22, label="Orphan cleanup")
+    if ssh is None:
+        return
     try:
         listing = _ssh_exec(ssh, "docker service ls --format '{{.Name}}'")
         orphans = find_orphaned_services(known_app_names, tracked, listing.splitlines())
